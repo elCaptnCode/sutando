@@ -11,6 +11,7 @@ Run: python3 tests/review-preflight-assert-head.test.py
 """
 import importlib.util
 import io
+import json
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -85,6 +86,43 @@ class AssertHead(unittest.TestCase):
         rc, out, _ = _run(["3774"], HEAD)
         self.assertEqual(rc, 0)
         self.assertIn("Lessons", out)
+
+
+class CurrentHead(unittest.TestCase):
+    """Drive `current_head` itself. Every test above replaces it, so its own body —
+    the gh-failed branch and the empty-sha conversion — was never executed, and the
+    unreadable polarity was inherited from `_gh_json` rather than pinned here."""
+
+    class _Proc:
+        def __init__(self, rc, out):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def _runner(self, rc=0, out=""):
+        return lambda argv: self._Proc(rc, out)
+
+    def test_reads_the_sha(self):
+        body = json.dumps({"head": {"sha": HEAD}})
+        self.assertEqual(rp.current_head("1", runner=self._runner(out=body),
+                                         repo="o/r"), HEAD)
+
+    def test_gh_failure_is_None_not_an_empty_answer(self):
+        self.assertIsNone(rp.current_head("1", runner=self._runner(rc=1), repo="o/r"))
+
+    def test_unparseable_body_is_None(self):
+        self.assertIsNone(rp.current_head("1", runner=self._runner(out="{not json"),
+                                          repo="o/r"))
+
+    def test_an_EMPTY_sha_is_None_not_the_empty_string(self):
+        """`""` would compare falsely against any --assert-head and could reach the
+        moved/unchanged branch with nothing in it."""
+        for body in ('{"head": {"sha": ""}}', '{"head": {}}', '{}'):
+            self.assertIsNone(rp.current_head("1", runner=self._runner(out=body),
+                                              repo="o/r"), body)
+
+    def test_a_raising_runner_is_None(self):
+        def boom(argv):
+            raise OSError("gh not on PATH")
+        self.assertIsNone(rp.current_head("1", runner=boom, repo="o/r"))
 
 
 if __name__ == "__main__":
