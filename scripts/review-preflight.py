@@ -337,6 +337,12 @@ def main(argv: "list[str] | None" = None) -> int:
         if not args.pr:
             print("review-preflight: --assert-head needs the PR number", file=sys.stderr)
             return 2
+        # A prefix compare accepts short shas, so a 1-char argument would match
+        # almost any head: too short is a usage error, never a quiet pass.
+        if len(args.assert_head) < 7:
+            print(f"review-preflight: --assert-head {args.assert_head!r} is too short; "
+                  "give at least 7 characters (git's short-sha length)", file=sys.stderr)
+            return 2
         head = current_head(args.pr, repo=args.repo)
         if head is None:
             print(f"review-preflight: could not read the head of #{args.pr} — "

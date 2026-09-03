@@ -49,6 +49,21 @@ class AssertHead(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("unchanged", out)
 
+    def test_a_TOO_SHORT_sha_is_refused_not_quietly_accepted(self):
+        """The prefix compare is what makes short shas usable, and it is also what
+        would let `-​-assert-head f` match five sixteenths of all heads. A guard
+        whose weak input silently passes is the failure this guard exists for."""
+        for short in ("f", "f89", "f89fec"):
+            rc, _, err = _run(["3774", "--assert-head", short], HEAD)
+            self.assertEqual(rc, 2, f"{short!r} must be a usage error")
+            self.assertIn("too short", err)
+
+    def test_seven_characters_is_accepted(self):
+        """The boundary itself, so the cutoff cannot drift without a test failing."""
+        rc, out, _ = _run(["3774", "--assert-head", HEAD[:7]], HEAD)
+        self.assertEqual(rc, 0)
+        self.assertIn("unchanged", out)
+
     def test_MOVED_head_fails(self):
         rc, _, err = _run(["3774", "--assert-head", "637d3d37b"], HEAD)
         self.assertEqual(rc, 3)
