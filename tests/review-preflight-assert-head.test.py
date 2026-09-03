@@ -125,5 +125,39 @@ class CurrentHead(unittest.TestCase):
         self.assertIsNone(rp.current_head("1", runner=boom, repo="o/r"))
 
 
+class ExplicitEmptyAssertHead(unittest.TestCase):
+    """`--assert-head ''` must not skip the check the flag exists to perform.
+
+    argparse gives None when the option is absent and "" when it is passed
+    empty; a truthiness test collapses those, so the whole head-assertion
+    branch was bypassed and main() fell through to ordinary guide rendering.
+    """
+
+    def _run(self, argv):
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            try:
+                rc = rp.main(argv)
+            except SystemExit as exc:      # argparse usage errors
+                rc = exc.code
+        return rc, err.getvalue()
+
+    def test_empty_WITH_a_pr_is_a_usage_error_not_a_pass(self):
+        rc, err = self._run(["--assert-head", "", "3781"])
+        self.assertEqual(rc, 2, err)
+        self.assertIn("too short", err)
+
+    def test_empty_WITHOUT_a_pr_still_demands_the_pr(self):
+        rc, err = self._run(["--assert-head", ""])
+        self.assertEqual(rc, 2, err)
+        self.assertIn("needs the PR number", err)
+
+    def test_ABSENT_is_still_absent(self):
+        """The arm: `is not None` must not turn a missing flag into a check."""
+        rc, err = self._run(["--assert-head", "abcdef", "3781"])
+        self.assertEqual(rc, 2, err)          # too short, i.e. the branch ran
+        self.assertNotIn("needs the PR number", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

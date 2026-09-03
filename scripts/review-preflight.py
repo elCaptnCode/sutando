@@ -333,7 +333,9 @@ def main(argv: "list[str] | None" = None) -> int:
                          "immediately before posting, with the sha you verified at")
     args = ap.parse_args(argv)
 
-    if args.assert_head:
+    # `is not None`, not truthiness: argparse gives "" for an explicit
+    # `--assert-head ''`, and a falsy value must not skip the whole check.
+    if args.assert_head is not None:
         if not args.pr:
             print("review-preflight: --assert-head needs the PR number", file=sys.stderr)
             return 2
