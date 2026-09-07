@@ -298,6 +298,7 @@ from .team_guardrail import (team_guardrail_lines, engage_rulebook,
                              AG2SPACE_PROVENANCE, sandboxed_delegation_lines)
 from . import team_result_guard
 from .outbox import DeliveryOutcome, record_delivered
+from .proactive_recovery import claim_owner_may_be_alive as _pid_alive
 from .outbox_adapter import classify_response
 from .send_failure_policy import MAX_TRANSIENT_ATTEMPTS, resolve_failed_send
 from .delivery_core import (DeliveryCore, DesignAClaimBackend, DrainStatus,
@@ -3246,16 +3247,6 @@ def _record_proactive_receipt(item_id: str, room: str) -> None:
     except Exception as e:  # noqa: BLE001 — receipt is best-effort by design
         _log(f"proactive receipt write failed for {item_id}: {e} "
              "(delivery unaffected)")
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # exists but not signalable — treat as alive
-    return True
 
 
 def _recover_orphan_proactive() -> None:

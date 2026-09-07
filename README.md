@@ -230,6 +230,8 @@ Sutando started life on macOS and most of its app-automation surface — AppleSc
 
 Dashboard and `/tasks/active` use platform process probes, not a fixed `pgrep` path.
 Missing process tools do not abort either response; the macOS-only Sutando app reports as not running on Windows.
+Proactive orphan recovery uses the shared, non-signalling process-identity probe:
+only confirmed dead owners release claims; live or uninspectable owners keep them.
 
 **Returns a `macOSOnly` error on Windows (the voice agent stays up; Gemini tells the user):**
 - `switch_app`, `press_key`, `type_text`, `volume`, `brightness`, `fullscreen`, `slide_control`, `toggle_tasks`
