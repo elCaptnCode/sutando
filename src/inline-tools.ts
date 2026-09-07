@@ -5,8 +5,8 @@
  *
  * Originally macOS-only (osascript, pbcopy/pbpaste, screencapture, …). On
  * Windows, the platform-specific call sites delegate to src/platform.ts so
- * clipboard, notifications, and screen capture work; AppleScript-only tools
- * (switch_app, type_text, press_key against a specific app, Chrome JS-injected
+ * clipboard, notifications, screen capture, and app switching work; AppleScript-only tools
+ * (type_text, press_key against a specific app, Chrome JS-injected
  * scroll, QuickTime control) return a clear `macOSOnly` error rather than
  * silently failing. The error is surfaced to Gemini so the voice/phone agent
  * can fall back to telling the user instead of pretending it ran the action.
@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { requirePython } from './python-binary.js';
 import type { ToolDefinition } from 'bodhi-realtime-agent';
 import { resolveWorkspace, statusPath, statusReadPath } from './workspace_default.js';
-import { isMacOS, clipboardRead, clipboardWrite, macOSOnlyError, openWithDefault } from './platform.js';
+import { isMacOS, isWindows, activateWindowsApp, clipboardRead, clipboardWrite, macOSOnlyError, openWithDefault } from './platform.js';
 import { PLAYBACK_PATH } from './tmp-paths.js';
 import { presenterModeActive } from './presenter-mode.js';
 
@@ -278,13 +278,25 @@ const PROCESS_NAMES: Record<string, string> = {
 export const switchAppTool: ToolDefinition = {
 	name: 'switch_app',
 	description:
-		'Switch to (activate) a macOS application. Use for: "switch to Chrome", "open Slack", "go to Terminal".',
+		'Switch to (activate) a macOS or Windows application. Use for: "switch to Chrome", "open Slack", "go to Terminal".',
 	parameters: z.object({
 		app: z.string().describe('Application name (e.g. "Google Chrome", "Slack", "Terminal", "Finder")'),
 	}),
 	execution: 'inline',
-	async execute(args) {
+	async execute(args, ctx) {
 		let { app } = args as { app: string };
+		if (isWindows()) {
+			try {
+				const windowsAliases: Record<string, string> = {
+					...APP_ALIASES, terminal: 'Terminal', explorer: 'File Explorer',
+					edge: 'Microsoft Edge', calculator: 'Calculator',
+				};
+				app = windowsAliases[app.toLowerCase()] ?? app;
+				return await activateWindowsApp(app, fileURLToPath(new URL('./windows-app-launcher.ps1', import.meta.url)), ctx?.abortSignal);
+			} catch (err) {
+				return { error: `Failed to switch to ${app}: ${err instanceof Error ? err.message : err}` };
+			}
+		}
 		if (!isMacOS()) return macOSOnlyError('switch_app');
 		app = APP_ALIASES[app.toLowerCase()] ?? app;
 		// Escape for AppleScript string literals — no shell layer needed with execFileSync.

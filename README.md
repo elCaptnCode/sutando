@@ -233,8 +233,14 @@ Missing process tools do not abort either response; the macOS-only Sutando app r
 Proactive orphan recovery uses the shared, non-signalling process-identity probe:
 only confirmed dead owners release claims; live or uninspectable owners keep them.
 
+`switch_app` and `pwsh -File scripts/open-app.ps1 "Calculator"` identify Windows
+apps by registered app ID or exact executable path and verify foreground focus.
+They reuse existing windows, restore minimized ones, and fail explicitly if no
+interactive desktop exists or Windows refuses focus. Bundled services include
+the same native backend; no window-title guessing or simulated keystrokes are used.
+
 **Returns a `macOSOnly` error on Windows (the voice agent stays up; Gemini tells the user):**
-- `switch_app`, `press_key`, `type_text`, `volume`, `brightness`, `fullscreen`, `slide_control`, `toggle_tasks`
+- `press_key`, `type_text`, `volume`, `brightness`, `fullscreen`, `slide_control`, `toggle_tasks`
 - `scroll`, `switch_tab`, `close_tab`, `open_url`, `click`, `point_at` (browser AppleEvents)
 - `join_gmeet`, `call_contact` (Chrome AppleScript)
 - `screen_record`, `play_video`, `pause_video`, `resume_video`, `replay_video`, `close_video`, `scroll_and_describe` (QuickTime + Chrome)

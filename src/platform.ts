@@ -16,7 +16,7 @@
  * tool level (see inline-tools.ts) — the helper layer doesn't try to fake it.
  */
 
-import { execSync, execFileSync, spawnSync } from 'node:child_process';
+import { execSync, execFile, execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -31,6 +31,41 @@ export function currentPlatform(): SupportedPlatform | 'other' {
 export const isWindows = (): boolean => process.platform === 'win32';
 export const isMacOS = (): boolean => process.platform === 'darwin';
 export const isLinux = (): boolean => process.platform === 'linux';
+
+export function activateWindowsApp(app: string, scriptPath: string, signal?: AbortSignal): Promise<{ status: 'switched'; app: string }> {
+	return new Promise((resolve, reject) => {
+		execFile('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-File', scriptPath, '-App', app], {
+			timeout: 15_000, encoding: 'utf8', windowsHide: true, signal,
+		}, (error, stdout, stderr) => {
+			let response: unknown;
+			try {
+				response = JSON.parse(stdout.trim());
+			} catch {
+				reject(new Error(stderr.trim() || error?.message || 'Windows app launcher returned invalid JSON.'));
+				return;
+			}
+			if (typeof response !== 'object' || response === null) {
+				reject(new Error('Windows app launcher returned an invalid response.'));
+				return;
+			}
+			if ('error' in response && typeof response.error === 'string') {
+				reject(new Error(response.error));
+				return;
+			}
+			if (error) {
+				reject(new Error(stderr.trim() || error.message));
+				return;
+			}
+			if (!('status' in response) || response.status !== 'switched'
+				|| !('foreground_verified' in response) || response.foreground_verified !== true
+				|| !('app' in response) || typeof response.app !== 'string' || !response.app.trim()) {
+				reject(new Error('Windows did not verify the requested app in the foreground.'));
+				return;
+			}
+			resolve({ status: 'switched', app: response.app });
+		});
+	});
+}
 
 // ---------- Notifications ----------
 
