@@ -322,7 +322,11 @@ def _write_artifact(path: Path, payload: dict) -> bool:
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            os.link(temporary, path)
+            if os.name == "nt":
+                # Windows rename is atomic and refuses to replace an existing file.
+                os.rename(temporary, path)
+            else:
+                os.link(temporary, path)
         except FileExistsError:
             pass
         return path.is_file()

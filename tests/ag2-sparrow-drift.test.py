@@ -13,6 +13,7 @@ own `tools/test_no_drift.py` was outside every discovery path (Codex #2082 P2).
 
 Run: python3 tests/ag2-sparrow-drift.test.py
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,7 +24,10 @@ SYNC = REPO / "packages" / "ag2-sparrow" / "tools" / "sync_from_src.py"
 
 def test_ag2_sparrow_bundled_utils_in_sync_with_src():
     assert SYNC.exists(), f"missing {SYNC}"
-    r = subprocess.run([sys.executable, str(SYNC), "--check"],
+    command = [sys.executable]
+    if os.environ.get("SUTANDO_TEST_SUBPROCESS_COVERAGE") == "1":
+        command += ["-m", "coverage", "run", f"--rcfile={REPO / '.coveragerc'}"]
+    r = subprocess.run(command + [str(SYNC), "--check"],
                        capture_output=True, text=True)
     assert r.returncode == 0, (
         "ag2-sparrow bundled utils drifted from src/. "

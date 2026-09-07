@@ -379,11 +379,11 @@ class IoEdge(unittest.TestCase):
         junk = lambda *a, **k: SimpleNamespace(returncode=0, stdout="garbage\n")
         self.assertIsNone(w.sampled_from_inside("/s", "=c:1", "tmux", runner=junk, tmux_pane="%7", tmux_env="/s,1,0", ancestors=[4242]))
         self.assertEqual(w._pid_ancestors(pid=777, runner=boom), [777])
-        if os.name == "nt":
-            snapshot = "PID PPID ARGS\n777 4242 child\n4242 1 parent\n"
-            with patch.object(w, "process_snapshot", return_value=snapshot):
-                self.assertEqual(w._pid_ancestors(pid=777), [777, 4242])
-        else:
+        snapshot = "PID PPID ARGS\n777 4242 child\n4242 1 parent\n"
+        with patch.object(w, "is_windows", return_value=True), \
+                patch.object(w, "process_snapshot", return_value=snapshot):
+            self.assertEqual(w._pid_ancestors(pid=777), [777, 4242])
+        if os.name != "nt":
             self.assertIn(os.getppid(), w._pid_ancestors())
 
     def test_pane_identity_probe(self):

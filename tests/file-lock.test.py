@@ -119,6 +119,27 @@ class LockContract(unittest.TestCase):
             file_lock.unlock_fd(42)
             fake.flock.assert_called_with(42, 8)
 
+    def test_windows_delegation_and_retry_policy(self):
+        fake = Mock(LK_NBLCK=1, LK_UNLCK=2)
+        with patch.object(file_lock, "fcntl", None), \
+                patch.object(file_lock, "msvcrt", fake, create=True), \
+                patch.object(file_lock.os, "lseek") as seek, \
+                patch.object(file_lock.time, "sleep") as sleep:
+            fake.locking.side_effect = [OSError(errno.EACCES, "busy"), None]
+            file_lock.lock_fd(42)
+            self.assertEqual(fake.locking.call_count, 2)
+            sleep.assert_called_once_with(0.05)
+            seek.assert_called_with(42, file_lock._WIN_LOCK_OFFSET, os.SEEK_SET)
+
+            fake.locking.reset_mock()
+            fake.locking.side_effect = OSError(errno.EINVAL, "bad descriptor")
+            with self.assertRaises(OSError):
+                file_lock.lock_fd(42)
+
+            fake.locking.reset_mock(side_effect=True)
+            file_lock.unlock_fd(42)
+            fake.locking.assert_called_once_with(42, fake.LK_UNLCK, 1)
+
     @unittest.skipUnless(os.name == "nt", "Windows handle accounting")
     def test_repeated_operations_do_not_leak(self):
         import ctypes

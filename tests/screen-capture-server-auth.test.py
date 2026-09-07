@@ -262,9 +262,33 @@ def test_capture_downscale_options_and_failure_are_visible() -> None:
     }, f"got body={failed._buf.getvalue()!r}")
 
 
+def test_notification_and_macos_display_delegate() -> None:
+    with unittest.mock.patch.object(sc, "_platform_notify") as notify:
+        sc._notify_capture_blocking()
+        ok("capture notification delegates to the platform helper",
+           notify.call_args.args == ("Captured screen",))
+    with unittest.mock.patch.object(
+            sc, "_platform_notify", side_effect=RuntimeError("unavailable")):
+        sc._notify_capture_blocking()
+        ok("capture notification failures remain advisory", True)
+
+    handler = _FakeHandler("/capture?display=2&format=png&silent=true", "secret-token")
+    with unittest.mock.patch.object(sc, "CAPTURE_TOKEN", "secret-token"), \
+         unittest.mock.patch("os.makedirs"), \
+         unittest.mock.patch.object(sc, "is_macos", return_value=True), \
+         unittest.mock.patch.object(sc.subprocess, "run") as run:
+        handler._handle_capture()
+    command = run.call_args.args[0]
+    ok("macOS display capture passes the requested display to screencapture",
+       "-D2" in command and command[-1].endswith("-d2.png"), f"got command={command!r}")
+    ok("macOS display capture returns success", handler._response_code == 200,
+       f"got code={handler._response_code}")
+
+
 test_downscale_invokes_sips_with_bounds()
 test_downscale_failure_only_allows_small_original()
 test_capture_downscale_options_and_failure_are_visible()
+test_notification_and_macos_display_delegate()
 
 # ---------------------------------------------------------------------------
 # Summary

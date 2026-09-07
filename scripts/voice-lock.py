@@ -73,7 +73,7 @@ import uuid
 
 try:
     import fcntl
-except ImportError:  # Windows
+except ImportError:  # pragma: no cover - native Windows import
     fcntl = None
 
 try:
@@ -233,17 +233,22 @@ class Guard:
 
     def __enter__(self):
         self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
-        if os.name == "nt":
-            if msvcrt is None:
-                raise RuntimeError("msvcrt unavailable on Windows")
-            if os.path.getsize(self.path) == 0:
-                os.write(self.fd, b"\0")
-            os.lseek(self.fd, 0, os.SEEK_SET)
-            msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
-        else:
-            if fcntl is None:
-                raise RuntimeError("fcntl unavailable on POSIX")
-            fcntl.flock(self.fd, fcntl.LOCK_EX)
+        try:
+            if os.name == "nt":
+                if msvcrt is None:
+                    raise RuntimeError("msvcrt unavailable on Windows")
+                if os.path.getsize(self.path) == 0:
+                    os.write(self.fd, b"\0")
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
+            else:
+                if fcntl is None:
+                    raise RuntimeError("fcntl unavailable on POSIX")
+                fcntl.flock(self.fd, fcntl.LOCK_EX)
+        except BaseException:
+            os.close(self.fd)
+            self.fd = None
+            raise
         return self
 
     def __exit__(self, *exc):
