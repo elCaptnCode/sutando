@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO / "packages" / "ag2-sparrow"))
 
 import outbox  # noqa: E402
 import proactive_recovery as recovery  # noqa: E402
+
 from ag2_sparrow import outbox as packaged_outbox  # noqa: E402
 from ag2_sparrow import proactive_recovery as packaged_recovery  # noqa: E402
 
