@@ -105,8 +105,18 @@ def main(argv=None) -> int:
               f"Is the credential proxy running? Nothing guessed.", file=sys.stderr)
         return 2
     now = datetime.datetime.now()
-    r5 = datetime.datetime.fromisoformat(a.reset5) if a.reset5 else None
-    r7 = datetime.datetime.fromisoformat(a.reset7) if a.reset7 else None
+    flags = {}
+    for flag, raw in (("--reset5", a.reset5), ("--reset7", a.reset7)):
+        try:
+            flags[flag] = datetime.datetime.fromisoformat(raw) if raw else None
+        except ValueError as e:
+            # The reset refusal below says "pass --reset5/--reset7"; a mistyped
+            # date there must refuse like stdin does, not traceback with no TIER.
+            print(f"quota-tier: {flag} is not a parseable ISO datetime ({e}); "
+                  f"fix it or drop it to use the printed reset lines. "
+                  f"Nothing guessed.", file=sys.stderr)
+            return 2
+    r5, r7 = flags["--reset5"], flags["--reset7"]
     if not (r5 and r7):
         # Fall back to the printed reset lines, year inferred and bounds-checked.
         try:

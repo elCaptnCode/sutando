@@ -136,6 +136,16 @@ class ResetFallback(unittest.TestCase):
             self.assertIn("cannot read quota windows", out)
             self.assertNotIn("Traceback", out)
 
+    def test_unparseable_reset_flags_are_a_refusal_not_a_traceback(self):
+        """The reset refusal says "pass --reset5/--reset7"; a mistyped date on
+        that very flag must not reproduce the traceback this file refuses."""
+        text = "5h window: 10% used, 90% remaining\n7d window: 20% used, 80% remaining\n"
+        for argv in (["--reset5", "not-a-date"], ["--reset7", "not-a-date"]):
+            rc, out = self._run(text, argv)
+            self.assertEqual(rc, 2, out)
+            self.assertIn(f"{argv[0]} is not a parseable ISO datetime", out)
+            self.assertNotIn("Traceback", out)
+
 
 class FreshWindowZeroBurn(unittest.TestCase):
     """A just-reset 7d window has used7 == 0, so `burn` is 0 and then divides.
