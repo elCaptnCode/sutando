@@ -533,7 +533,7 @@
   },
   {
    "name": "switch_app",
-   "description": "Switch to (activate) a macOS application. Use for: \"switch to Chrome\", \"open Slack\", \"go to Terminal\".",
+   "description": "Switch to (activate) a macOS or Windows application. Use for: \"switch to Chrome\", \"open Slack\", \"go to Terminal\".",
    "execution": "inline",
    "params": {
     "app": "Application name (e.g. \"Google Chrome\", \"Slack\", \"Terminal\", \"Finder\")"
@@ -541,7 +541,7 @@
   },
   {
    "name": "switch_app",
-   "description": "Switch to (activate) a macOS application. Use for: \"switch to Chrome\", \"open Slack\", \"go to Terminal\".",
+   "description": "Switch to (activate) a macOS or Windows application. Use for: \"switch to Chrome\", \"open Slack\", \"go to Terminal\".",
    "execution": "inline",
    "params": {
     "app": "Application name (e.g. \"Google Chrome\", \"Slack\", \"Terminal\", \"Finder\")"

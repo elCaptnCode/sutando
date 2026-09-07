@@ -194,6 +194,7 @@ def behavioral() -> list:
         original_link = guard.os.link
         original_name = guard.os.name
         original_rename = guard.os.rename
+        original_fchmod = getattr(guard.os, "fchmod", None)
         try:
             def raced_link(_temporary, destination):
                 Path(destination).write_text("race winner", encoding="utf-8")
@@ -217,12 +218,18 @@ def behavioral() -> list:
             guard.os.link = lambda *_args: (_ for _ in ()).throw(
                 AssertionError("Windows artifact publication must not require hard links"))
             guard.os.rename = consuming_rename
+            guard.os.fchmod = lambda *_args: (_ for _ in ()).throw(
+                AssertionError("Windows artifact publication must not require fchmod"))
             if not guard._write_artifact(directory / "windows.json", {"value": 3}):
                 fails.append("Windows artifact publication must use atomic rename")
         finally:
             guard.os.name = original_name
             guard.os.link = original_link
             guard.os.rename = original_rename
+            if original_fchmod is None:
+                del guard.os.fchmod
+            else:
+                guard.os.fchmod = original_fchmod
 
     with tempfile.TemporaryDirectory() as td:
         state = Path(td) / "state"
