@@ -9,12 +9,14 @@ Covers:
 Run: `python3 tests/single-instance.test.py`
 """
 import importlib.util
+import errno
 import os
 import sys
 import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,6 +74,18 @@ class TestSingleInstance(unittest.TestCase):
         mod = _load_single_instance(workspace_dir)
         self._mods.append(mod)
         return mod
+
+    def test_lock_io_failure_propagates_and_closes_fd(self):
+        mod = self._load(self.workspace)
+        failure = OSError(errno.EIO, "injected lock I/O failure")
+        with patch.object(mod, "lock_fd", side_effect=failure) as lock, \
+                patch.object(mod.os, "_exit", side_effect=SystemExit) as exit_process:
+            with self.assertRaises(OSError) as caught:
+                mod.acquire("io-failure")
+        self.assertIs(caught.exception, failure)
+        exit_process.assert_not_called()
+        with self.assertRaises(OSError):
+            os.fstat(lock.call_args.args[0])
 
     # (a) First acquire writes PID to lock file and returns normally.
     def test_first_acquire_writes_pid(self):

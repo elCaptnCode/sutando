@@ -25,6 +25,7 @@ doesn't restart-loop when it's simply the second instance.
 """
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -53,8 +54,11 @@ def acquire(name: str) -> None:
 
     try:
         lock_fd(fd, blocking=False)
-    except (BlockingIOError, OSError):
-        _exit_contended(fd, name)
+    except OSError as exc:
+        if isinstance(exc, BlockingIOError) or (os.name == "nt" and exc.errno == errno.EACCES):
+            _exit_contended(fd, name)
+        os.close(fd)
+        raise
 
     # Overwrite PID so tooling can inspect who holds the lock (offset 0,
     # outside the Windows lock region).
