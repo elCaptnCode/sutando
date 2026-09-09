@@ -7523,8 +7523,19 @@ def _is_ephemeral(target: str) -> bool:
     Equality counts: a link pointing AT the root is as ephemeral as one pointing
     inside it, and a trailing-slash prefix test answers False for exactly that case.
     """
-    t = os.path.normpath(target).rstrip("/") or "/"
-    return any(t == r or t.startswith(r + "/") for r in _ephemeral_roots())
+    t = os.path.normcase(os.path.normpath(target))
+    roots = (os.path.normcase(os.path.normpath(r)) for r in _ephemeral_roots())
+    return any(t == r or t.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+
+def _is_skill_link(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        # Directory junctions are mount-point reparse tags, including on Python 3.11.
+        return path.lstat().st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    except (OSError, AttributeError):
+        return False
 
 
 def check_skill_symlinks() -> dict:
@@ -7588,13 +7599,14 @@ def check_skill_symlinks() -> dict:
             continue
         skill_name = skill_dir.name
         dst = skills_dst / skill_name
-        if dst.is_symlink() and not dst.exists():
+        is_link = _is_skill_link(dst)
+        if is_link and not dst.exists():
             broken.append(skill_name)
-        elif not dst.exists() and not dst.is_symlink():
+        elif not dst.exists() and not is_link:
             unlinked.append(skill_name)
-        elif dst.is_dir() and not dst.is_symlink():
+        elif dst.is_dir() and not is_link:
             shadowed.append(skill_name)
-        elif (dst.is_symlink() and _is_ephemeral(os.path.realpath(dst))
+        elif (is_link and _is_ephemeral(os.path.realpath(dst))
               and not _is_ephemeral(str(skills_src.resolve()))):
             # The MISMATCH is the defect, not temp-rootedness: a temp-rooted repo
             # is self-consistent, and another DURABLE clone is a supported layout.
@@ -7612,7 +7624,7 @@ def check_skill_symlinks() -> dict:
         for entry in sorted(skills_dst.iterdir()):
             if entry.name in repo_names:
                 continue
-            if entry.is_symlink() and not entry.exists():
+            if _is_skill_link(entry) and not entry.exists():
                 orphaned.append(entry.name)
     except OSError:
         pass
