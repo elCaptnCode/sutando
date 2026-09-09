@@ -265,6 +265,7 @@ def probe_pids(pattern: str) -> tuple[list[str], bool]:
                 "Get-CimInstance Win32_Process | "
                 "Where-Object { $_.CommandLine -and $_.ProcessId -ne $PID } | "
                 "ForEach-Object { $cl = $_.CommandLine.ToLower().Trim(); "
+                "$cl = $cl.Trim('\"').Trim(\"'\"); "
                 f"if ($cl -notlike '*{sentinel}*' -and {cond}) {{ $_.ProcessId }} }}"
             )
             r = subprocess.run(
