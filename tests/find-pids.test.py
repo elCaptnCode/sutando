@@ -87,11 +87,11 @@ class TestFindPids(unittest.TestCase):
                       f"end-anchored find_pids({marker+'$'!r}) should match trailing marker; got {pids}")
 
     def test_end_anchor_matches_quoted_trailing_path(self):
-        marker = str(ROOT / "fixture with spaces" / "discord-bridge.py")
+        marker = str(ROOT / "fixture with spaces" / "quoted-process.py")
         child = self._spawn_sleeper(marker)
-        pids = self.mod.find_pids(r"discord-bridge\.py$")
+        pids = self.mod.find_pids(r"quoted-process\.py$")
         self.assertIn(str(child.pid), pids,
-                      f"quoted trailing script path should match bridge suffix; got {pids}")
+                      f"quoted trailing script path should match its suffix; got {pids}")
 
     # The `$` anchor does NOT match when the marker is mid-command-line.
     def test_end_anchor_rejects_midline_marker(self):
