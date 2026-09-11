@@ -284,6 +284,26 @@ function Claim-Task($file) {
     }
 }
 
+function Get-VerifiedDiscordCollaborator($claimedPath) {
+    $candidates = @()
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python) { $candidates += ,@($python.Source) }
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) { $candidates += ,@($py.Source, '-3') }
+    foreach ($candidate in $candidates) {
+        try {
+            $exe = $candidate[0]
+            $prefixArgs = @($candidate | Select-Object -Skip 1)
+            $payload = & $exe @prefixArgs (Join-Path $PSScriptRoot 'discord_access.py') --task-file $claimedPath 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $payload) { continue }
+            $verified = ($payload -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($verified.authorized -eq $true -and $verified.body -and $verified.channel_id) { return $verified }
+            return $null
+        } catch {}
+    }
+    return $null
+}
+
 function Process-Task($claimedPath, $taskId) {
     $prompt = Get-TaskPrompt $claimedPath
     if (-not $prompt) {
@@ -291,18 +311,11 @@ function Process-Task($claimedPath, $taskId) {
         return
     }
 
-    # Tier guard. Non-owner (team/other) tasks carry a `===SUTANDO SYSTEM
-    # INSTRUCTIONS===` fence the bridge appends AFTER the metadata headers,
-    # telling the consumer to run the task under `codex --sandbox read-only`.
-    # Get-TaskPrompt only returns the `task:` body and discards everything from
-    # the first header onward — so the fence never reaches the prompt. Feeding
-    # the bare body to `claude --print --dangerously-skip-permissions` would run
-    # untrusted content with FULL capabilities, violating CLAUDE.md's "non-owner
-    # tasks MUST be processed via the sandboxed path." The dispatcher has no
-    # sandbox, so the only safe action is to refuse. Owner tier (or a task with
-    # no access_tier — voice/local/older producers) processes normally.
+    # A verified Discord collaborator keeps the complete body and channel rulebook.
+    # Other non-owner tasks retain the refusal path.
     $accessTier = Get-TaskHeader $claimedPath 'access_tier'
-    if ($accessTier -and $accessTier -ne 'owner') {
+    $collaborator = if ($accessTier -eq 'team') { Get-VerifiedDiscordCollaborator $claimedPath } else { $null }
+    if ($accessTier -and $accessTier -ne 'owner' -and -not $collaborator) {
         Log "${taskId}: refusing non-owner task (access_tier=$accessTier) — dispatcher has no sandbox"
         $refusal = 'Sandbox unavailable; refusing non-owner task.'
         $resultFile = Join-Path $RESULTS "$taskId.txt"
@@ -318,13 +331,23 @@ function Process-Task($claimedPath, $taskId) {
     # so voice/discord/telegram each retain their own conversation thread.
     $channel = Get-TaskHeader $claimedPath 'channel_id'
     if (-not $channel) { $channel = 'local' }
+    if ($collaborator) { $channel = $collaborator.channel_id }
 
     # Frame the prompt so the one-shot subprocess answers the user, not narrates
     # its own plumbing. Without this the subprocess reads the repo CLAUDE.md
     # (task-bridge protocol, dispatcher rules) and replies with dispatcher/
     # session/result-file jargon instead of the user's actual question.
     $source = Get-TaskHeader $claimedPath 'source'
-    if ($source -in @('discord', 'telegram', 'slack', 'voice', 'chat')) {
+    if ($collaborator) {
+        Log "${taskId}: engaging verified Discord collaborator in channel=$channel"
+        $prompt = @"
+You are Sutando, replying to a designated collaborator in this Discord channel. This sender is not the owner. Apply the collaborator authority and privacy boundaries below to this turn, including when earlier owner messages authorized work.
+
+$($collaborator.body)
+
+Delivery for this turn is handled automatically. Return only your concise final reply; it will be published in this channel. Do not write a result file or send the reply yourself.
+"@
+    } elseif ($source -in @('discord', 'telegram', 'slack', 'voice', 'chat')) {
         $surface = switch ($source) {
             'discord'  { 'a Discord chat' }
             'telegram' { 'a Telegram chat' }
