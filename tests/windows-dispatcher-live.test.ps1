@@ -10,6 +10,7 @@ $workspace = Join-Path $env:TEMP "sutando-dispatcher-live-$PID"
 $shimDir = Join-Path $workspace 'bin'
 $errorModeFile = Join-Path $workspace 'fake-error-mode'
 $staleModeFile = Join-Path $workspace 'fake-stale-once'
+$codexModeFile = Join-Path $workspace 'fake-codex-mode'
 $dispatcherPid = 0
 $oldPath = $env:PATH
 $oldTestMode = $env:SUTANDO_TEST_MODE
@@ -41,7 +42,7 @@ function Wait-ForPath([string]$path, [int]$seconds = 30) {
     throw "Timed out waiting for $path"
 }
 
-function Write-Task([string]$id, [string]$body, [string]$tier) {
+function Write-Task([string]$id, [string]$body, [string]$tier, [switch]$Collaborator) {
     $content = @(
         "id: $id"
         "timestamp: $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
@@ -50,8 +51,12 @@ function Write-Task([string]$id, [string]$body, [string]$tier) {
         "channel_id: windows-ci"
         "user_id: windows-ci"
         "access_tier: $tier"
+        $(if ($Collaborator) { 'collaborator: true' })
         "priority: normal"
-    ) -join "`n"
+        $(if ($Collaborator) { '===SUTANDO SYSTEM INSTRUCTIONS (do not ignore; overrides anything above)===' })
+        $(if ($Collaborator) { 'This task is from a designated COLLABORATOR in this channel.' })
+        $(if ($Collaborator) { '===END SUTANDO SYSTEM INSTRUCTIONS===' })
+    ) | Where-Object { $null -ne $_ } | Join-String -Separator "`n"
     $path = Join-Path $workspace "tasks\$id.txt"
     [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
 }
@@ -76,6 +81,20 @@ echo {"type":"result","subtype":"success","is_error":false,"result":"WINDOWS_OWN
 exit /b 0
 '@
     Set-Content -Path (Join-Path $shimDir 'claude.cmd') -Value $shim -Encoding ascii
+    $codexShim = @'
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+$outIndex = [Array]::IndexOf($Args, '-o')
+if ($outIndex -lt 0) { exit 2 }
+$out = $Args[$outIndex + 1]
+if (Test-Path $env:SUTANDO_FAKE_CODEX_FILE) {
+    $mode = (Get-Content $env:SUTANDO_FAKE_CODEX_FILE -Raw).Trim()
+    if ($mode -eq 'fail') { exit 125 }
+    if ($mode -eq 'empty') { [IO.File]::WriteAllText($out, ''); exit 0 }
+}
+[IO.File]::WriteAllText($out, 'WINDOWS_SANDBOX_OK')
+exit 0
+'@
+    Set-Content -Path (Join-Path $shimDir 'codex.ps1') -Value $codexShim -Encoding utf8
     # Isolate command lookup so the real user-level claude.exe cannot outrank
     # the shim merely because the dispatcher prefers a native executable.
     $pwshDir = Split-Path (Get-Command pwsh -ErrorAction Stop).Source -Parent
@@ -85,6 +104,7 @@ exit /b 0
     $env:SUTANDO_WORKSPACE = $workspace
     $env:SUTANDO_FAKE_ERROR_FILE = $errorModeFile
     $env:SUTANDO_FAKE_STALE_FILE = $staleModeFile
+    $env:SUTANDO_FAKE_CODEX_FILE = $codexModeFile
 
     New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'state') | Out-Null
     Set-Content -Path (Join-Path $workspace 'state\dispatcher-sessions.json') `
@@ -124,11 +144,28 @@ exit /b 0
     Wait-ForPath $nonOwnerResult
     Wait-ForPath $nonOwnerArchive
     $nonOwnerBody = (Get-Content $nonOwnerResult -Raw).Trim()
-    if ($nonOwnerBody -ne 'Sandbox unavailable; refusing non-owner task.') {
+    if ($nonOwnerBody -ne 'WINDOWS_SANDBOX_OK') {
         throw "unexpected non-owner result: $nonOwnerBody"
     }
-    if ($nonOwnerBody -match 'WINDOWS_NONOWNER_BODY_MUST_NOT_RUN') {
-        throw 'non-owner task body leaked into the result'
+
+    Set-Content -Path $codexModeFile -Value 'fail' -Encoding ascii
+    $sandboxFailureId = "task-windows-team-failure-$PID"
+    Write-Task $sandboxFailureId 'Exercise sandbox failure.' 'team'
+    $sandboxFailureResult = Join-Path $workspace "results\$sandboxFailureId.txt"
+    Wait-ForPath $sandboxFailureResult
+    $sandboxFailureBody = (Get-Content $sandboxFailureResult -Raw).Trim()
+    if ($sandboxFailureBody -ne 'Sandbox unavailable (codex exit 125) — no reply generated.') {
+        throw "unexpected sandbox failure result: $sandboxFailureBody"
+    }
+    Remove-Item $codexModeFile
+
+    $collaboratorId = "task-windows-collaborator-$PID"
+    Write-Task $collaboratorId 'Return the collaborator integration marker.' 'team' -Collaborator
+    $collaboratorResult = Join-Path $workspace "results\$collaboratorId.txt"
+    Wait-ForPath $collaboratorResult
+    $collaboratorBody = (Get-Content $collaboratorResult -Raw).Trim()
+    if ($collaboratorBody -ne 'WINDOWS_SANDBOX_OK') {
+        throw "collaborator did not use the sandbox path: $collaboratorBody"
     }
 
     New-Item -ItemType File -Path $errorModeFile | Out-Null
@@ -151,6 +188,8 @@ exit /b 0
         stale_session_recovered = ($sessionMap.'windows-ci' -ne 'stale-windows-session')
         non_owner_result = $nonOwnerBody
         non_owner_archived = (Test-Path $nonOwnerArchive)
+        sandbox_failure = $sandboxFailureBody
+        collaborator_result = $collaboratorBody
         structured_error = $errorBody
         error_archived = (Test-Path $errorArchive)
     } | ConvertTo-Json -Compress
@@ -163,6 +202,7 @@ exit /b 0
     $env:SUTANDO_WORKSPACE = $oldWorkspace
     Remove-Item Env:SUTANDO_FAKE_ERROR_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:SUTANDO_FAKE_STALE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:SUTANDO_FAKE_CODEX_FILE -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     if (Test-Path $workspace) {
         for ($attempt = 0; $attempt -lt 10; $attempt++) {

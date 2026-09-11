@@ -105,7 +105,11 @@ if (-not $claudeCmd) {
     exit 1
 }
 $CLAUDE = $claudeCmd.Source
-Log "task-dispatcher started. claude=$CLAUDE workspace=$WORKSPACE"
+$codexAll = Get-Command codex -All -ErrorAction SilentlyContinue
+$codexCmd = ($codexAll | Where-Object { $_.Path -and $_.Path.ToLower().EndsWith('.exe') } | Select-Object -First 1)
+if (-not $codexCmd) { $codexCmd = ($codexAll | Select-Object -First 1) }
+$CODEX = if ($codexCmd) { $codexCmd.Source } else { $null }
+Log "task-dispatcher started. claude=$CLAUDE codex=$(if ($CODEX) { $CODEX } else { 'unavailable' }) workspace=$WORKSPACE"
 
 if ($ValidateOnly) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue
@@ -128,7 +132,7 @@ if ($ValidateOnly) {
 $script:KNOWN_TASK_HEADERS = @(
     'id', 'timestamp', 'source', 'channel_id', 'channel_name',
     'guild_name', 'source_message_id', 'parent_message_id',
-    'user_id', 'access_tier', 'priority'
+    'user_id', 'access_tier', 'collaborator', 'priority'
 )
 $script:HEADER_LINE_RE = '^(?:' + ($script:KNOWN_TASK_HEADERS -join '|') + '):\s'
 function Get-TaskPrompt($path) {
@@ -208,6 +212,15 @@ function Get-TaskHeader($path, $key) {
     return $null
 }
 
+function Get-SystemInstructions($path) {
+    $content = Get-Content -Raw -Path $path -ErrorAction SilentlyContinue
+    if (-not $content) { return $null }
+    $marker = '===SUTANDO SYSTEM INSTRUCTIONS'
+    $start = $content.LastIndexOf($marker, [StringComparison]::Ordinal)
+    if ($start -lt 0) { return $null }
+    return $content.Substring($start).Trim()
+}
+
 # Session map persists across dispatcher restarts so a channel keeps the same
 # resumable claude conversation. Schema:
 #   { "<channel_id>": "<session-uuid>", ... }
@@ -272,6 +285,43 @@ function Test-StaleClaudeSession($call) {
     return "$stdout`n$($call.Stderr)" -match '(?i)No conversation found with session ID'
 }
 
+function Invoke-CodexSandbox($prompt, $systemInstructions, $taskId, $tier, $stderrPath) {
+    if (-not $CODEX) {
+        return 'Sandbox unavailable (codex exit 127) — no reply generated.'
+    }
+
+    $staging = Join-Path $RESULTS ".codex-staging-$taskId.txt"
+    Remove-Item -Path $staging, $stderrPath -ErrorAction SilentlyContinue
+    $sandboxPrompt = @"
+You are answering on behalf of Sutando, an autonomous personal AI agent.
+Reply directly and briefly to the user's message. Return factual information only.
+This is a $tier-tier request. Do not modify files, run external actions, access credentials, or reveal private owner context.
+
+User request:
+$prompt
+
+Trusted execution policy:
+$systemInstructions
+"@
+    $args = @('exec', '--sandbox', 'read-only', '--skip-git-repo-check')
+    if ($tier -eq 'guest') { $args += @('-C', [IO.Path]::GetTempPath()) }
+    $args += @('-o', $staging, '--', $sandboxPrompt)
+    $null | & $CODEX @args 2>$stderrPath | Out-Null
+    $exitCode = $LASTEXITCODE
+    Remove-Item -Path $stderrPath -ErrorAction SilentlyContinue
+    if ($exitCode -ne 0) {
+        Remove-Item -Path $staging -ErrorAction SilentlyContinue
+        return "Sandbox unavailable (codex exit $exitCode) — no reply generated."
+    }
+    if (-not (Test-Path $staging) -or (Get-Item $staging).Length -eq 0) {
+        Remove-Item -Path $staging -ErrorAction SilentlyContinue
+        return 'Sandbox unavailable (codex exited 0 with no output) — no reply generated.'
+    }
+    $result = Get-Content -Raw -Path $staging
+    Remove-Item -Path $staging -ErrorAction SilentlyContinue
+    return $result
+}
+
 # Claim a task by renaming it to `.processing` - atomic on NTFS. Returns the
 # new path on success, $null if some other process already claimed it.
 function Claim-Task($file) {
@@ -291,22 +341,14 @@ function Process-Task($claimedPath, $taskId) {
         return
     }
 
-    # Tier guard. Non-owner (team/other) tasks carry a `===SUTANDO SYSTEM
-    # INSTRUCTIONS===` fence the bridge appends AFTER the metadata headers,
-    # telling the consumer to run the task under `codex --sandbox read-only`.
-    # Get-TaskPrompt only returns the `task:` body and discards everything from
-    # the first header onward — so the fence never reaches the prompt. Feeding
-    # the bare body to `claude --print --dangerously-skip-permissions` would run
-    # untrusted content with FULL capabilities, violating CLAUDE.md's "non-owner
-    # tasks MUST be processed via the sandboxed path." The dispatcher has no
-    # sandbox, so the only safe action is to refuse. Owner tier (or a task with
-    # no access_tier — voice/local/older producers) processes normally.
     $accessTier = Get-TaskHeader $claimedPath 'access_tier'
+    $systemInstructions = Get-SystemInstructions $claimedPath
     if ($accessTier -and $accessTier -ne 'owner') {
-        Log "${taskId}: refusing non-owner task (access_tier=$accessTier) — dispatcher has no sandbox"
-        $refusal = 'Sandbox unavailable; refusing non-owner task.'
+        $tier = if ($accessTier -in @('team', 'guest')) { $accessTier } else { 'guest' }
+        Log "${taskId}: processing non-owner task in codex read-only sandbox (access_tier=$tier)"
+        $result = Invoke-CodexSandbox $prompt $systemInstructions $taskId $tier "$claimedPath.stderr"
         $resultFile = Join-Path $RESULTS "$taskId.txt"
-        [System.IO.File]::WriteAllText($resultFile, $refusal, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($resultFile, [string]$result, [System.Text.UTF8Encoding]::new($false))
         $archived = Join-Path $ARCHIVE "$taskId.txt"
         try { Move-Item -Path $claimedPath -Destination $archived -Force }
         catch { Remove-Item -Path $claimedPath -ErrorAction SilentlyContinue }
