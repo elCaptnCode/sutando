@@ -81,7 +81,7 @@ See [Sutando architecture boundaries](docs/architecture-boundaries.md) for the
 normative definitions of core, adapters, apps, skills, tooling, and workspace
 state.
 
-![Sutando architecture: voice and phone realtime agents use inline tools for instant actions; Telegram and Discord bridges queue larger work to tasks/, the scheduled proactive loop watches tasks/, and the core agent executes work with available tools before returning results to each channel.](docs/assets/sutando-architecture.webp)
+![Sutando architecture: voice and phone realtime agents use inline tools for instant actions; Telegram and Discord bridges queue larger work to tasks/, the scheduled proactive loop watches tasks/, and the core agent executes work with available tools before returning results to each channel.](docs/assets/sutando-architecture.png)
 
 Four processes work together:
 - **Voice agent** (Gemini Live, WebSocket on :9900) — listens and talks in real time for browser voice.
