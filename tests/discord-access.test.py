@@ -47,6 +47,10 @@ class DiscordAccessTests(unittest.TestCase):
         self.assertEqual(self.authorize(self.task(body=body)), {
             "authorized": True, "channel_id": "222", "body": body})
 
+    def test_tolerates_prebody_blank_lines_without_losing_authority(self):
+        self.assertEqual(self.authorize(self.task(extra="\n")), {
+            "authorized": True, "channel_id": "222", "body": "Hello"})
+
     def test_every_required_header_is_unique_and_prebody(self):
         for name in self.headers:
             with self.subTest(name=name, shape="missing"):
@@ -76,6 +80,15 @@ class DiscordAccessTests(unittest.TestCase):
         key_path(self.workspace).unlink()
         self.assertEqual(self.authorize(signed), {"authorized": False})
         self.assertFalse(key_path(self.workspace).exists())
+
+    def test_signed_headers_without_a_body_delimiter_are_denied(self):
+        text = "\n".join(f"{key}: {value}" for key, value in self.headers.items())
+        self.assertEqual(self.authorize(stamp_text(text, self.workspace)), {"authorized": False})
+
+    def test_invalid_task_input_fails_closed(self):
+        for text in (None, 42, b"not decoded task text"):
+            with self.subTest(text=text):
+                self.assertEqual(self.authorize(text), {"authorized": False})
 
     def test_current_channel_membership_and_admission_are_both_required(self):
         text = self.task()
@@ -141,18 +154,58 @@ class DiscordAccessTests(unittest.TestCase):
             self.assertEqual(discord_access.main(), 0)
         self.assertEqual(json.loads(output.getvalue()), {"authorized": False})
 
+    def test_unreadable_task_file_fails_closed(self):
+        task_file = self.workspace / "tasks" / "task-fixture.txt"
+        task_file.parent.mkdir()
+        with patch.object(discord_access, "resolve_workspace", return_value=self.workspace):
+            self.assertEqual(discord_access.authorize_task_file(task_file), {"authorized": False})
+            task_file.write_bytes(b"\xff")
+            self.assertEqual(discord_access.authorize_task_file(task_file), {"authorized": False})
+            task_file.write_text(self.task(), encoding="utf-8")
+            with patch.object(Path, "open", side_effect=PermissionError("fixture read denied")):
+                self.assertEqual(discord_access.authorize_task_file(task_file), {"authorized": False})
+
+    def test_cli_authorized_file_returns_complete_verified_body(self):
+        task_file = self.workspace / "tasks" / "task-fixture.txt"
+        task_file.parent.mkdir()
+        body = "Hello\n--- context ---\nKeep this complete."
+        task_file.write_text(self.task(body=body), encoding="utf-8")
+        access_file = self.workspace / "access.json"
+        mutate_access_file(access_file, lambda _: (self.access, None))
+        with patch.object(discord_access, "resolve_workspace", return_value=self.workspace), \
+                patch.object(discord_access, "resolve_discord_access_file", return_value=access_file), \
+                patch.object(sys, "argv", ["discord_access.py", "--task-file", str(task_file)]), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(discord_access.main(), 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "authorized": True, "channel_id": "222", "body": body})
+
     def test_bridge_delegates_both_collaborator_helpers(self):
-        names = ("resolve_is_collaborator", "resolve_team_collaborator")
+        signatures = {
+            "resolve_is_collaborator": ["access_data", "sender_id", "serving_channel_id"],
+            "resolve_team_collaborator": ["access_data", "access_tier", "sender_id", "serving_channel_id"],
+        }
         tree = ast.parse((ROOT / "src" / "discord-bridge.py").read_text(encoding="utf-8"))
-        wrappers = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
-                                    and node.name in names], type_ignores=[])
-        namespace = {}
-        exec(compile(wrappers, "bridge-collaborator-wrappers", "exec"), namespace)
-        for name, args in ((names[0], (self.access, "111", "222")),
-                           (names[1], (self.access, "team", "111", "222"))):
-            with patch.object(discord_access, name, return_value="delegated") as delegate:
-                self.assertEqual(namespace[name](*args), "delegated")
-                delegate.assert_called_once_with(*args)
+        wrappers = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name in signatures}
+        self.assertEqual(set(wrappers), set(signatures))
+        for name, parameters in signatures.items():
+            with self.subTest(name=name):
+                wrapper = wrappers[name]
+                self.assertEqual([arg.arg for arg in wrapper.args.args], parameters)
+                self.assertEqual(len(wrapper.body), 2)
+                imported, returned = wrapper.body
+                self.assertIsInstance(imported, ast.ImportFrom)
+                self.assertEqual((imported.module, imported.level), ("discord_access", 0))
+                self.assertEqual(len(imported.names), 1)
+                delegate = imported.names[0]
+                self.assertEqual(delegate.name, name)
+                self.assertIsInstance(returned, ast.Return)
+                self.assertIsInstance(returned.value, ast.Call)
+                self.assertEqual(returned.value.func.id, delegate.asname or delegate.name)
+                self.assertEqual([arg.id for arg in returned.value.args], parameters)
+                self.assertEqual(returned.value.keywords, [])
+        self.assertTrue(discord_access.resolve_team_collaborator(self.access, "team", "111", "222"))
         self.assertFalse(discord_access.resolve_team_collaborator(self.access, "owner", "111", "222"))
         self.assertFalse(discord_access.resolve_is_collaborator(self.access, "111", "333"))
 
