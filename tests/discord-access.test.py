@@ -94,6 +94,7 @@ class DiscordAccessTests(unittest.TestCase):
         text = self.task()
         for change in (lambda cfg: cfg["groups"]["222"].update(collaborators=[]),
                        lambda cfg: cfg["groups"]["222"].update(allowFrom=["333"]),
+                       lambda cfg: cfg["groups"]["222"].update(allowFrom=[]),
                        lambda cfg: cfg["groups"].pop("222"),
                        lambda cfg: cfg.update(dmPolicy="disabled"),
                        lambda cfg: cfg.update(dmPolicy="unknown")):
@@ -101,10 +102,10 @@ class DiscordAccessTests(unittest.TestCase):
             change(access)
             self.assertEqual(self.authorize(text, access), {"authorized": False})
         access = copy.deepcopy(self.access)
-        access["groups"]["222"]["allowFrom"] = []
-        self.assertEqual(self.authorize(text, access), {"authorized": False})
         access["groups"]["333"] = {"allowFrom": ["111"]}
         self.assertTrue(self.authorize(text, access)["authorized"])
+        access["groups"]["222"]["allowFrom"] = []
+        self.assertEqual(self.authorize(text, access), {"authorized": False})
 
     def test_current_global_tier_changes_cannot_promote_collaborators(self):
         text = self.task()

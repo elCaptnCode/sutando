@@ -45,13 +45,12 @@ def admitted_team_collaborator(access_data, sender_id, channel_id):
         if not all(isinstance(items, list) and all(isinstance(item, str) for item in items)
                    for items in (global_allow, channel_allow, collaborators)):
             return False
-        if channel_allow and sender_id not in channel_allow and sender_id not in global_allow:
+        if sender_id not in channel_allow and sender_id not in global_allow:
             return False
         if sender_id in global_allow:
             tier_map = access_data.get("tierMap", {})
             return isinstance(tier_map, dict) and canonical_access_tier(tier_map.get(sender_id, "team")) == "team"
-        return any(isinstance(cfg, dict) and isinstance(cfg.get("allowFrom"), list)
-                   and sender_id in cfg["allowFrom"] for cfg in groups.values())
+        return sender_id in channel_allow
     except Exception:
         return False
 
