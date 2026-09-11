@@ -83,6 +83,8 @@ state.
 
 ![Sutando architecture: voice and phone realtime agents use inline tools for instant actions; Telegram and Discord bridges queue larger work to tasks/, the scheduled proactive loop watches tasks/, and the core agent executes work with available tools before returning results to each channel.](docs/assets/sutando-architecture.png)
 
+The core agent's loop is a cron job that fires `/proactive-loop` every 15 minutes (`*/15 * * * *` in the per-host `crons.json`). On Claude, Sutando backs that off to every 30 minutes when 7-day quota utilization reaches 80%, restoring the configured cadence once an authoritative routed reading drops below it; missing, stale, rejected, or unrouted telemetry holds the slower cadence and reports why. Each pass keeps a persistent watcher on `tasks/` via Claude Code's `Monitor` tool, so tasks are processed on arrival rather than on the tick, and also runs health checks and picks the next build-log item.
+
 Four processes work together:
 - **Voice agent** (Gemini Live, WebSocket on :9900) — listens and talks in real time for browser voice.
 - **Web client** (`com.sutando.web-client.plist`, HTTP on :8080) — separate launchd service that serves the browser UI. The browser then connects directly to the voice agent's WebSocket on :9900 — the web client is not in the WebSocket data path.
