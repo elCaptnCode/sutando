@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="900" viewBox="0 0 1800 900" role="img" aria-labelledby="title desc">
+<title id="title">Sutando Architecture</title>
+<desc id="desc">Voice, phone, Telegram, and Discord feed realtime agents and messaging bridges. Inline tools handle instant actions. Larger work queues through tasks to the core agent, which uses available tools and writes results back. A scheduled proactive loop watches tasks, runs health checks, and selects build-log work.</desc>
+<defs>
+  <style>
+    .t{font-family:Arial,Helvetica,sans-serif;fill:#0b1f4d}.h{font-size:28px;font-weight:700}.s{font-size:18px}.m{font-size:16px}.box{fill:#fff;stroke:#d8e2f1;stroke-width:2;rx:14}.blue{fill:#f3f8ff;stroke:#9ec8ff}.purple{fill:#f7f3ff;stroke:#bea7ff}.green{fill:#f2fff8;stroke:#8cd9b2}.gold{fill:#fffaf0;stroke:#f3c65d}.arrow{fill:none;stroke:#0c50d8;stroke-width:4;marker-end:url(#a)}.parrow{fill:none;stroke:#6c2ee8;stroke-width:4;marker-end:url(#pa)}.narrow{fill:none;stroke:#102a56;stroke-width:4;marker-end:url(#na)}.dash{fill:none;stroke:#39517d;stroke-width:3;stroke-dasharray:8 8;marker-end:url(#na)}
+  </style>
+  <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#0c50d8"/></marker>
+  <marker id="pa" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6c2ee8"/></marker>
+  <marker id="na" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#102a56"/></marker>
+</defs>
+<rect width="1800" height="900" fill="#ffffff"/>
+<text x="40" y="64" class="t" style="font-size:54px;font-weight:800">Sutando</text><line x1="300" y1="25" x2="300" y2="72" stroke="#b7c4d9" stroke-width="2"/><text x="325" y="62" class="t" style="font-size:42px;font-weight:700;fill:#425a86">Architecture</text>
+<text x="40" y="102" class="t" style="font-size:25px;fill:#536b99">Natural conversation. Real work. Across your tools.</text>
+<text x="1230" y="42" class="t s" style="fill:#536b99">Voice, phone, and messaging to a unified agent</text><text x="1230" y="66" class="t s" style="fill:#536b99">that can converse, use tools instantly, and execute larger tasks.</text>
+
+<rect x="40" y="135" width="320" height="555" class="box"/><text x="65" y="176" class="t h">Your Channels</text><text x="65" y="204" class="t s" style="fill:#536b99">Talk or text from where you are.</text>
+<rect x="62" y="230" width="275" height="82" class="box"/><text x="95" y="264" class="t h" style="font-size:22px">Voice (Browser)</text><text x="95" y="292" class="t s" style="fill:#536b99">Talk in your browser</text>
+<rect x="62" y="332" width="275" height="82" class="box"/><text x="95" y="366" class="t h" style="font-size:22px">Phone (Twilio)</text><text x="95" y="394" class="t s" style="fill:#536b99">Talk on your phone</text>
+<rect x="62" y="468" width="275" height="82" class="box"/><text x="95" y="502" class="t h" style="font-size:22px">Telegram</text><text x="95" y="530" class="t s" style="fill:#536b99">Text chat</text>
+<rect x="62" y="570" width="275" height="82" class="box"/><text x="95" y="604" class="t h" style="font-size:22px">Discord</text><text x="95" y="632" class="t s" style="fill:#536b99">Text chat</text>
+
+<rect x="430" y="135" width="400" height="290" class="blue" rx="14"/><text x="460" y="176" class="t h">Realtime Conversation</text><text x="460" y="204" class="t s" style="fill:#536b99">Natural, low-latency voice conversations.</text>
+<rect x="455" y="225" width="350" height="82" class="box"/><text x="495" y="262" class="t h" style="font-size:24px">Voice Agent</text><text x="495" y="290" class="t s" style="fill:#536b99">Gemini Live · WS :9900</text>
+<rect x="455" y="328" width="350" height="82" class="box"/><text x="495" y="365" class="t h" style="font-size:24px">Conversation Server</text><text x="495" y="393" class="t s" style="fill:#536b99">Gemini Live · WS :3100</text>
+
+<rect x="430" y="448" width="400" height="225" class="purple" rx="14"/><text x="460" y="486" class="t h">Messaging Bridges</text><text x="460" y="514" class="t s" style="fill:#6d56a8">Convert text conversations into tasks.</text>
+<rect x="455" y="532" width="350" height="64" class="box"/><text x="500" y="572" class="t h" style="font-size:22px">Telegram Bridge</text>
+<rect x="455" y="608" width="350" height="64" class="box"/><text x="500" y="648" class="t h" style="font-size:22px">Discord Bridge</text>
+
+<rect x="885" y="192" width="315" height="190" class="green" rx="14"/><text x="920" y="238" class="t h">Inline Tools</text><text x="920" y="269" class="t s" style="fill:#008a56">Instant, in-process</text><text x="920" y="317" class="t s">describe_screen,</text><text x="920" y="342" class="t s">get_current_time, hang_up, dtmf, …</text>
+<rect x="850" y="475" width="250" height="125" class="gold" rx="14"/><text x="920" y="525" class="t h">tasks/</text><text x="890" y="557" class="t s" style="fill:#536b99">Queue for larger work</text>
+
+<rect x="1230" y="100" width="520" height="250" class="blue" rx="14"/><text x="1330" y="145" class="t h">Scheduled Proactive Loop</text><text x="1330" y="177" class="t s">Runs <tspan font-weight="700">/proactive-loop</tspan> on a schedule</text><text x="1330" y="202" class="t m" style="fill:#536b99">normally every 15 minutes; may back off to 30 minutes</text><text x="1330" y="225" class="t m" style="fill:#536b99">on Claude at high 7-day quota utilization.</text><text x="1330" y="267" class="t s">• Watches <tspan font-weight="700">tasks/</tspan> (Claude Code Monitor)</text><text x="1330" y="300" class="t s">• Runs health checks</text><text x="1330" y="333" class="t s">• Picks next build-log item</text>
+
+<rect x="1135" y="435" width="355" height="165" class="purple" rx="14"/><text x="1260" y="493" class="t h">Core Agent</text><text x="1260" y="526" class="t s" style="fill:#536b99">Claude Code or Codex CLI</text><text x="1260" y="558" class="t m" style="fill:#536b99">Executes tasks using your tools.</text>
+<rect x="1175" y="642" width="270" height="92" class="blue" rx="14"/><text x="1265" y="683" class="t h">results/</text><text x="1250" y="714" class="t s" style="fill:#536b99">Task results</text>
+<rect x="1545" y="390" width="210" height="325" class="box"/><text x="1570" y="430" class="t h" style="font-size:23px">Your Tools</text><text x="1570" y="458" class="t m" style="fill:#536b99">Uses anything you have access to.</text><text x="1590" y="505" class="t s">email</text><text x="1590" y="545" class="t s">calendar</text><text x="1590" y="585" class="t s">browser</text><text x="1590" y="625" class="t s">files</text><text x="1590" y="665" class="t s">phone</text><text x="1590" y="705" class="t s">reminders · etc.</text>
+
+<path d="M337 271 H455" class="arrow"/><path d="M337 373 H455" class="arrow"/><path d="M337 509 H455" class="parrow"/><path d="M337 611 H455" class="parrow"/><path d="M805 265 H885" class="arrow"/><path d="M805 369 H885" class="arrow"/><path d="M805 564 H850" class="parrow"/><path d="M805 640 H850" class="parrow"/><path d="M1100 535 H1135" class="narrow"/><path d="M1312 350 V435" class="dash"/><path d="M1312 600 V642" class="narrow"/><path d="M1490 518 H1545" class="narrow"/><path d="M1545 535 H1490" class="narrow"/>
+<path d="M1310 734 V775 H185 V690" class="narrow"/><text x="590" y="760" class="t s" style="fill:#536b99">Results are delivered back to you</text><text x="578" y="784" class="t m" style="fill:#536b99">(spoken via voice/phone, text via Telegram/Discord).</text>
+<line x1="40" y1="840" x2="1760" y2="840" stroke="#eef2f8"/><text x="40" y="875" class="t h" style="font-size:30px">Sutando</text><text x="205" y="875" class="t s" style="fill:#536b99">One agent. Many ways to talk. Real work gets done.</text><text x="1440" y="875" class="t s" style="fill:#244a84">https://github.com/sonichi/sutando</text>
+</svg>
