@@ -45,8 +45,10 @@ The bridge and dispatcher must resolve the same workspace and
 `CLAUDE_CONFIG_DIR`, including the task envelope key and Discord access file.
 After updating code, restart both services through the host's normal launcher.
 Unsigned or invalid tasks, revoked collaborators, and other non-owner tasks
-retain the Windows dispatcher's existing refusal behavior. Owner processing is
-unchanged. No access-file migration or automatic collaborator grant is performed.
+use the Windows dispatcher's read-only sandbox path. If the sandbox is unavailable
+or fails, the dispatcher returns its failure result without granting normal
+capabilities. Owner processing is unchanged. No access-file migration or automatic
+collaborator grant is performed.
 
 ### Reading another Discord channel's content (contextNotFrom gate)
 

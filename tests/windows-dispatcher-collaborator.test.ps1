@@ -27,8 +27,8 @@ function Wait-ForPath([string]$path, [int]$seconds = 30) {
     throw "Timed out waiting for test artifact: $([IO.Path]::GetFileName($path))"
 }
 
-function Read-Captures {
-    @(Get-ChildItem -LiteralPath (Join-Path $workspace 'captures') -File -Filter '*.json' |
+function Read-Captures([string]$provider = 'claude') {
+    @(Get-ChildItem -LiteralPath (Join-Path $workspace "captures\$provider") -File -Filter '*.json' |
         Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
 }
 
@@ -70,7 +70,8 @@ function Stop-TestDispatcher {
 }
 
 try {
-    foreach ($directory in @($shimDir, $configRoot, (Join-Path $workspace 'captures'))) {
+    foreach ($directory in @($shimDir, $configRoot,
+            (Join-Path $workspace 'captures\claude'), (Join-Path $workspace 'captures\codex'))) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
     }
     $python = (Get-Command python -ErrorAction Stop).Source
@@ -88,7 +89,7 @@ import os
 from pathlib import Path
 import sys
 
-capture_dir = Path(os.environ['SUTANDO_WORKSPACE']) / 'captures'
+capture_dir = Path(os.environ['SUTANDO_WORKSPACE']) / 'captures' / 'claude'
 arguments = sys.argv[1:]
 session_flag = '--resume' if '--resume' in arguments else '--session-id'
 session_id = arguments[arguments.index(session_flag) + 1]
@@ -105,6 +106,26 @@ print(json.dumps({'type': 'result', 'is_error': False, 'result': 'WINDOWS_CLAUDE
 exit /b %errorlevel%
 '@
     Set-Content -LiteralPath (Join-Path $shimDir 'claude.cmd') -Value $shim -Encoding ascii
+
+    $codexShim = @'
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+$ErrorActionPreference = 'Stop'
+$outputIndex = [Array]::IndexOf($Arguments, '-o')
+if ($outputIndex -lt 0) { throw 'Sandbox invocation has no output path.' }
+$outputPath = [IO.Path]::GetFullPath($Arguments[$outputIndex + 1])
+$resultsDir = [IO.Path]::GetFullPath((Join-Path $env:SUTANDO_WORKSPACE 'results'))
+if ([IO.Path]::GetDirectoryName($outputPath) -ne $resultsDir) {
+    throw 'Sandbox output escaped the isolated test results directory.'
+}
+$captureDir = Join-Path $env:SUTANDO_WORKSPACE 'captures\codex'
+$captureIndex = @(Get-ChildItem -LiteralPath $captureDir -File -Filter '*.json').Count
+$capturePath = Join-Path $captureDir ('{0:D4}.json' -f $captureIndex)
+$record = @{ arguments = @($Arguments); prompt = $Arguments[-1]; output_path = $outputPath }
+[IO.File]::WriteAllText($capturePath, ($record | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($outputPath, 'WINDOWS_SANDBOX_OK', [Text.UTF8Encoding]::new($false))
+exit 0
+'@
+    [IO.File]::WriteAllText((Join-Path $shimDir 'codex.ps1'), $codexShim, [Text.UTF8Encoding]::new($false))
 
     $fixtureHelper = @'
 import json
@@ -178,6 +199,7 @@ os.replace(staged, tasks / f'{task_id}.txt')
 
     $captures = @(Read-Captures)
     if ($captures.Count -ne 3) { throw 'Authorized turns did not reach the Claude shim exactly once each.' }
+    if (@(Read-Captures 'codex').Count -ne 0) { throw 'An authorized direct turn reached the sandbox.' }
     if ($captures[0].arguments -notcontains '--session-id') { throw 'Owner turn did not create its channel session.' }
     foreach ($index in @(1, 2)) {
         $mode = if ($index -eq 1) { 'human' } else { 'bot' }
@@ -198,16 +220,38 @@ os.replace(staged, tasks / f'{task_id}.txt')
     $sessionMap = Get-Content -LiteralPath (Join-Path $workspace 'state\dispatcher-sessions.json') -Raw | ConvertFrom-Json
     if ($sessionMap.'100000000000000004' -ne $captures[0].session_id) { throw 'Channel session mapping changed unexpectedly.' }
 
-    $deniedModes = @('plain-team', 'forged-body', 'tampered', 'unsigned', 'wrong-channel', 'revoked', 'revoked-admission')
-    foreach ($mode in $deniedModes) {
-        Complete-Fixture $mode 'Sandbox unavailable; refusing non-owner task.'
+    $sandboxModes = @('plain-team', 'forged-body', 'tampered', 'unsigned', 'wrong-channel', 'revoked', 'revoked-admission')
+    foreach ($index in 0..($sandboxModes.Count - 1)) {
+        $mode = $sandboxModes[$index]
+        Complete-Fixture $mode 'WINDOWS_SANDBOX_OK'
         if (@(Read-Captures).Count -ne 3) { throw "Unauthorized task reached the Claude shim: $mode" }
+        $sandboxCaptures = @(Read-Captures 'codex')
+        if ($sandboxCaptures.Count -ne $index + 1) { throw "Sandbox task did not execute exactly once: $mode" }
+        $sandbox = $sandboxCaptures[$index]
+        if (($sandbox.arguments[0..3] -join ' ') -ne 'exec --sandbox read-only --skip-git-repo-check') {
+            throw "Sandbox restrictions were not preserved: $mode"
+        }
+        foreach ($forbidden in @('--resume', '--session-id', '--dangerously-bypass-approvals-and-sandbox', '--yolo')) {
+            if ($sandbox.arguments -contains $forbidden) { throw "Sandbox reused direct authority or context: $mode" }
+        }
+        foreach ($required in @("WINDOWS_COLLAB_BODY_START $mode", 'This is a team-tier request.',
+                'Do not modify files, run external actions, access credentials, or reveal private owner context.',
+                'Trusted execution policy:', 'Never read .env, credentials, or secrets.',
+                'Scope: collaborator status is per-channel only')) {
+            if (-not $sandbox.prompt.Contains($required)) { throw "Sandbox request or guardrail missing: $mode" }
+        }
+        if ($sandbox.prompt.Contains('WINDOWS_OWNER_CONTEXT')) { throw "Sandbox received the owner's turn: $mode" }
+        if (Test-Path -LiteralPath $sandbox.output_path) { throw "Sandbox staging output was not consumed: $mode" }
     }
+    $finalSessions = Get-Content -LiteralPath (Join-Path $workspace 'state\dispatcher-sessions.json') -Raw | ConvertFrom-Json
+    if ($finalSessions.'100000000000000004' -ne $captures[0].session_id -or
+        @($finalSessions.PSObject.Properties).Count -ne 1) { throw 'Sandbox tasks changed direct channel sessions.' }
     [pscustomobject]@{
         authorized_turns = $captures.Count
         full_body_and_guardrail = $true
         channel_session_reused = $true
-        denied_without_claude = $deniedModes
+        sandbox_read_only_and_guardrail = $true
+        sandboxed_without_claude = $sandboxModes
     } | ConvertTo-Json -Compress
 } finally {
     Stop-TestDispatcher
