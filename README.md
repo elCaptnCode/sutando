@@ -24,7 +24,7 @@ https://github.com/user-attachments/assets/a86ec34e-3b26-4011-824c-d2d124753c25
 
 | [![The AI agent that presented live](https://img.youtube.com/vi/tisE8YjmLdU/mqdefault.jpg)](https://youtu.be/tisE8YjmLdU) | [![ep.007 — 50 days. 600+ PRs. #1 trending dev.](https://img.youtube.com/vi/nET6ImJRuKk/mqdefault.jpg)](https://youtu.be/nET6ImJRuKk) | [![Vision talk at UC Berkeley](https://img.youtube.com/vi/c39fJ2WAj6A/mqdefault.jpg)](https://youtu.be/c39fJ2WAj6A?t=7719) |
 |:---:|:---:|:---:|
-| 🤖 [The AI agent that presented live](https://youtu.be/tisE8YjmLdU) | 📺 [ep.007 — 50 days. 600+ PRs. #1 trending](https://youtu.be/nET6ImJRuKk) | 📺 [Vision talk at UC Berkeley](https://youtu.be/c39fJ2WAj6A?t=7719) |
+| 🤖 [The AI agent that presented live](https://youtu.be/tisE8YjmLdU) | 📺 [ep.007 — 50 days. 600+ PRs. #1 trending](https://youtu.be/nET6ImJRuKk) | 📺 [Vision talk at UC Berkeley](https://youtu.be/nET6ImJRuKk) |
 
 ---
 
