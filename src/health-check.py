@@ -3366,8 +3366,54 @@ def check_skills_driver_code_drift(workspace: "Path | None" = None) -> dict:
         return {"name": name, "status": "ok", "detail": "no stamp recorded yet — driver has not logged a version"}
     if not head:
         return {"name": name, "status": "ok", "detail": "could not read skills HEAD — not asserting drift"}
-    if running == head:
-        return {"name": name, "status": "ok", "detail": f"content-driver running {running}, matches skills HEAD"}
+    # Never compare two abbreviations: each writer picks its own length, so they
+    # agree until a colliding object lands and `--short` grows. Resolve both.
+    def _git(*args, timeout=10):
+        return subprocess.run(git_argv("-C", str(skills), *args),
+                              capture_output=True, text=True, timeout=timeout)
+
+    def _oid(rev):
+        """(state, oid) — 'ok' | 'absent' | 'unknown'.
+
+        A nonzero exit does not establish absence: an unreadable loose object,
+        a signal, or exit 128 all fail while the commit is right there. Absence
+        is established POSITIVELY, by asking how many objects carry the prefix.
+        """
+        try:
+            r = _git("rev-parse", "--verify", f"{rev}^{{commit}}")
+            if r.returncode == 0 and r.stdout.strip():
+                return ("ok", r.stdout.strip())
+            # --disambiguate takes an object PREFIX. A symbolic name like HEAD
+            # matches nothing, which would read as absence rather than a failure.
+            if not _re.fullmatch(r"[0-9a-fA-F]{4,40}", rev or ""):
+                return ("unknown", "")
+            d = _git("rev-parse", f"--disambiguate={rev}")
+        except Exception:
+            return ("unknown", "")
+        # rc 0 with nothing on stdout and a complaint on stderr is a FAILED
+        # read, not an empty candidate set: an unreadable object dir does this.
+        if d.returncode != 0 or (not d.stdout.strip() and d.stderr.strip()):
+            return ("unknown", "")
+        n = len([ln for ln in d.stdout.split() if ln.strip()])
+        # 0 candidates is the only positively-established absence. One candidate
+        # that would not resolve means present-but-unreadable; >1 is ambiguous.
+        return ("absent", "") if n == 0 else ("unknown", "")
+    head_state, head_oid = _oid("HEAD")
+    if head_state != "ok":
+        return {"name": name, "status": "ok",
+                "detail": f"HEAD in the skills checkout is {head_state} — not asserting drift"}
+    run_state, run_oid = _oid(running)
+    # Unobserved is not stale. An ambiguous prefix or an unrunnable git says
+    # nothing about the driver; only a resolvable, different commit does.
+    if run_state == "unknown":
+        return {"name": name, "status": "ok",
+                "detail": (f"could not identify the driver stamp {running} (ambiguous prefix, "
+                           f"unreadable object, or git unavailable) — INCONCLUSIVE, not asserting "
+                           f"drift or a re-arm")}
+    same = run_oid == head_oid
+    if same:
+        return {"name": name, "status": "ok",
+                "detail": f"content-driver running {running}, matches skills HEAD ({head})"}
     return {"name": name, "status": "warn",
             "detail": (f"content-driver is running {running} but skills HEAD is {head} — the pull did not reach "
                        f"the process, which froze its code at launch. Merged skill fixes are NOT in effect. "
@@ -6658,7 +6704,8 @@ def check_core_supervisor() -> dict:
     "needs you" line + the prompt excerpt; degraded states (crashed / hung /
     gateway-down) → warn; healthy (running / idle-ready / blocked-known, the
     last being pre-seeded/auto-answered) → ok. File missing → ok (monitor not
-    running, or a pre-supervisor install).
+    running, or a pre-supervisor install). File present but unparseable → warn:
+    it can hide a hard blocker, and the relay escalates on it too.
     """
     name = "core-supervisor"
     sig_path = status_read_path("core-supervisor.json", WORKSPACE_DIR)
@@ -6667,7 +6714,12 @@ def check_core_supervisor() -> dict:
     try:
         data = json.loads(sig_path.read_text())
     except Exception as e:
-        return {"name": name, "status": "ok", "detail": f"core-supervisor.json unreadable: {str(e)[:60]}"}
+        data, err = None, str(e)[:60]
+    else:
+        err = f"expected an object, got {type(data).__name__}"
+    if not isinstance(data, dict):
+        return {"name": name, "status": "warn",
+                "detail": f"core-supervisor.json unreadable ({err}) — a blocked core can't be ruled out"}
     state = data.get("state", "unknown")
     detail = state
     prompt = data.get("prompt")
