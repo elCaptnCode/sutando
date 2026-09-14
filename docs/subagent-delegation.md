@@ -25,6 +25,13 @@ ambiguous debugging, security/privacy decisions, code review, synthesis. Escalat
 result to the session model when confidence is low or consequences are material; never silently
 choose a more expensive model.
 
+## Subagent recursion and concurrency guardrails
+
+- **Recursion limit:** Max subagent recursion depth ≤ 2 (a subagent may spawn child subagents, but those children must not spawn further subagents).
+- **Concurrency & volume cap:** Concurrency ≤ 10 per delegation point, with overall session subagent concurrency capped at 100. If a task requires more work, batch into sequential chunks or execute inline.
+- **Diff review rule:** For diffs touching fewer than 15 files, inspect changes directly in the main
+  session using git commands or direct file reads. Do not fan out subagents for small/medium diffs.
+
 
 ## When no delegation mechanism is available
 
