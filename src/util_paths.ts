@@ -25,12 +25,12 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { dirname, join, win32 } from 'node:path';
 import { resolveWorkspace } from './workspace_default.js';
 
-function expandHome(p: string): string {
-	return p.replace(/^~/, process.env.HOME || '');
+export function expandHome(p: string): string {
+	return p.replace(/^~/, homedir());
 }
 
 /**
@@ -226,7 +226,7 @@ export function claudeHomePath(...subpath: string[]): string {
 		}
 		base = expandHome(home);
 	} else {
-		base = join(process.env.HOME || '', '.claude');
+		base = join(homedir(), '.claude');
 	}
 	if (subpath.length === 0) return base;
 	return join(base, ...subpath);
@@ -259,7 +259,7 @@ export function voiceMemoryProjectSlug(agentModuleDir: string): string {
 // no-cors requests or read local files).
 // ---------------------------------------------------------------------------
 
-const _CAPTURE_TOKEN_PATH = join(process.env.HOME || '', '.config', 'sutando', 'screen-capture-token');
+const _CAPTURE_TOKEN_PATH = join(homedir(), '.config', 'sutando', 'screen-capture-token');
 
 /**
  * Read the screen-capture server token from disk.  Returns the token string

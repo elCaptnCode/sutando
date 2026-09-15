@@ -94,8 +94,7 @@ export const openFileTool: ToolDefinition = {
 			// silently-empty substitution flow through to a generic "file not
 			// found" error below.
 			const unresolvedVars: string[] = [];
-			const filePath = path
-				.replace(/^~/, process.env.HOME || '')
+			const filePath = expandHome(path)
 				.replace(/\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*)/g, (_, a, b) => {
 					const name = a || b;
 					const val = process.env[name];
@@ -990,7 +989,7 @@ export const createChatTaskTool: ToolDefinition = {
 // (legacy $SUTANDO_PRIVATE_DIR honored via sharedPersonalPath()), else
 // <workspace>/notes fallback. Notes are SHARED across the fleet so they live
 // at the top-level memory dir, not under machine-<host>/.
-import { sharedPersonalPath, memoryDirEnv, readCaptureToken } from './util_paths.js';
+import { sharedPersonalPath, memoryDirEnv, readCaptureToken, expandHome } from './util_paths.js';
 const NOTES_DIR = sharedPersonalPath('notes', WORKSPACE_DIR);
 
 export const showViewTool: ToolDefinition = {
@@ -1280,7 +1279,7 @@ async function loadSkillManifestTools(): Promise<{ owner: ToolDefinition[]; anyC
 	const dirsToScan: string[] = [join(REPO_ROOT, 'skills'), join(WORKSPACE_DIR, 'skills')];
 	const privateRoot = memoryDirEnv();
 	if (privateRoot) {
-		const expanded = privateRoot.replace(/^~/, process.env.HOME || '');
+		const expanded = expandHome(privateRoot);
 		dirsToScan.push(join(expanded, 'skills'));
 	}
 	// External plugin checkouts: an optional voice-surface plugin can live
@@ -1400,7 +1399,7 @@ function loadCoreDocumentedSkills(): { name: string; description: string }[] {
 	const dirsToScan: string[] = [join(REPO_ROOT, 'skills'), join(WORKSPACE_DIR, 'skills')];
 	const privateRoot = memoryDirEnv();
 	if (privateRoot) {
-		const expanded = privateRoot.replace(/^~/, process.env.HOME || '');
+		const expanded = expandHome(privateRoot);
 		dirsToScan.push(join(expanded, 'skills'));
 	}
 	// Last-write-wins map so private (later in dirsToScan) overrides public —

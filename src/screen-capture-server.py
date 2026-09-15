@@ -272,11 +272,32 @@ def _attach_name(entry: dict, names: list[dict], used: set[int]) -> None:
 
 
 def list_displays() -> list[dict]:
-    """Probe `screencapture -D<n>` and return one entry per attached display.
+    """Probe displays and return one entry per attached display.
 
-    The probe is authoritative for `index` because that is the argument the
-    capture routes take; profiler names are best-effort decoration.
+    On macOS, the `screencapture -D<n>` probe is authoritative for `index`
+    because that is the argument the capture routes take. Other platforms
+    expose one virtual screen through the platform capture helper.
     """
+    if not is_macos():
+        path = _os.path.join(DIR, "displayprobe-virtual.png")
+        try:
+            _os.makedirs(DIR, exist_ok=True)
+            if not _platform_capture_screen(path, fmt="png"):
+                return []
+            width, height = _png_size(path)
+            return [{
+                "index": 1,
+                "width": width,
+                "height": height,
+                "name": "Virtual screen",
+                "is_main": True,
+            }]
+        finally:
+            try:
+                _os.unlink(path)
+            except Exception:
+                pass
+
     names = _profiler_display_names()
     used: set[int] = set()
     displays: list[dict] = []
