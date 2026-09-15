@@ -36,7 +36,7 @@ REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 from workspace_default import resolve_workspace, status_read_path  # noqa: E402
 from sutando_config import config_get  # noqa: E402
-from sutando_platform import find_pids  # noqa: E402
+from sutando_platform import probe_pids  # noqa: E402
 from util_paths import personal_path, shared_personal_path, _host_label  # noqa: E402
 from pending_questions_md import active_region  # noqa: E402
 import dashboard_schedules  # noqa: E402
@@ -755,8 +755,11 @@ def render_dashboard() -> str:
     # Keyboard shortcuts
     # Match both the dev-built binary (`<repo>/src/Sutando/Sutando`) and the
     # distributed .app (`/Applications/Sutando.app/Contents/MacOS/Sutando`).
-    sutando_running = bool(find_pids("(Sutando|MacOS)/Sutando"))
+    sutando_pids, probe_ok = probe_pids("(Sutando|MacOS)/Sutando", timeout=3.0)
+    sutando_running = bool(sutando_pids)
     shortcut_status = '<span class="ok">✓</span> Sutando app running' if sutando_running else '<span class="bad">✗</span> Sutando app not running'
+    if not probe_ok:
+        shortcut_status = "Sutando app status unavailable"
     # Shortcuts come from <workspace>/state/hotkeys.json (published by the
     # Sutando app from its resolved config — single source of truth). Only the
     # human descriptions are local UI copy, keyed by the stable action name.

@@ -114,6 +114,16 @@ jobs:
           .\node_modules\.bin\tsx.cmd --test --test-force-exit tests/switch-app-windows.test.ts
           if ($LASTEXITCODE -ne 0) { throw 'switch-app-windows.test.ts failed' }
 
+      - name: Verify Windows startup and platform IO contracts
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tests/windows-workspace-encoding.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'windows-workspace-encoding.test.ps1 failed' }
+          pwsh -NoProfile -File tests/windows-startup.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'windows-startup.test.ps1 failed' }
+          .\node_modules\.bin\tsx.cmd --test --test-force-exit tests/platform-windows-io.test.ts
+          if ($LASTEXITCODE -ne 0) { throw 'platform-windows-io.test.ts failed' }
+
       - name: Validate startup and dispatcher with a Claude cmd shim
         shell: pwsh
         run: |
@@ -123,7 +133,8 @@ jobs:
           Set-Content -Path (Join-Path $shimDir 'claude.cmd') -Value '@exit /b 0' -Encoding ascii
           $env:PATH = "$shimDir;$env:PATH"
           $env:SUTANDO_TEST_MODE = '1'
-          $env:SUTANDO_WORKSPACE = $testWorkspace
+          @{ workspace = @{ path = $testWorkspace } } | ConvertTo-Json -Depth 3 |
+            Set-Content -Path 'sutando.config.local.json' -Encoding utf8
           Set-Content -Path '.env' -Value 'GEMINI_API_KEY=ci-placeholder' -Encoding ascii
           & pwsh -NoProfile -File src/startup.ps1 -ValidateOnly
           if ($LASTEXITCODE -ne 0) { throw "startup validation exited $LASTEXITCODE" }
@@ -150,6 +161,10 @@ jobs:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: '1'
         run: |
+          python tests/notify-ps1-dm-delegation.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'notify-ps1-dm-delegation.test.py failed' }
+          python tests/image-resize.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'image-resize.test.py failed' }
           python tests/find-pids.test.py
           if ($LASTEXITCODE -ne 0) { throw 'find-pids.test.py failed' }
           python tests/health-check-skill-junctions.test.py

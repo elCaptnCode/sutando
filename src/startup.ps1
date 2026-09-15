@@ -85,10 +85,10 @@ function Test-Tool($name, $hint) {
 
 if (-not (Test-Tool 'node' 'install Node.js 22+ from https://nodejs.org')) { $missing = 1 }
 if (-not (Test-Tool 'npx' 'comes with node')) { $missing = 1 }
-# Accept either a `python` on PATH or the `py` launcher — python.org installs
-# without "add to PATH" only expose `py`, and Get-PythonCmd falls back to it.
-if (-not ((Get-Command python -ErrorAction SilentlyContinue) -or (Get-Command py -ErrorAction SilentlyContinue))) {
-    Write-Host "  X python not found - install Python 3.11+ from https://python.org"
+. (Join-Path $REPO 'scripts/python-binary.ps1')
+try { $PY = Resolve-SutandoPython }
+catch {
+    Write-Host "  X $_"
     $missing = 1
 }
 if (-not (Test-Tool 'claude' 'install Claude Code: https://docs.anthropic.com/en/docs/claude-code/getting-started')) { $missing = 1 }
@@ -101,15 +101,19 @@ if ($missing -eq 1) {
 
 # --- Dependency install ------------------------------------------------------
 
-if (-not (Test-Path (Join-Path $REPO 'node_modules'))) {
-    Write-Host "  Installing npm dependencies..."
-    npm install
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  X npm install failed"
-        exit 1
+function Install-WindowsDependencies($repo) {
+    if (-not (Test-Path (Join-Path $repo 'node_modules'))) {
+        Write-Host "  Installing npm dependencies..."
+        # The pinned bodhi package includes dist; its POSIX lifecycle hook fails under cmd.exe.
+        npm ci --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw 'npm ci --ignore-scripts failed' }
+        Write-Host "  + Dependencies installed"
     }
-    Write-Host "  + Dependencies installed"
+    if (-not (Test-Path (Join-Path $repo 'node_modules/bodhi-realtime-agent/dist'))) {
+        throw 'bodhi-realtime-agent prebuilt dist is missing; reinstall dependencies with npm ci --ignore-scripts'
+    }
 }
+Install-WindowsDependencies $REPO
 
 # --- Service launch helpers --------------------------------------------------
 
@@ -137,6 +141,15 @@ function Test-BridgeRunning($needle) {
             Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } |
             Select-Object -First 1)
     } catch { return $false }
+}
+
+# Start-Process joins argument arrays without quoting, so preserve Windows argv boundaries explicitly.
+function ConvertTo-NativeArgumentString($arguments) {
+    return (($arguments | ForEach-Object {
+        $escaped = [regex]::Replace([string]$_, '(\\*)"', '$1$1\"')
+        $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+        '"' + $escaped + '"'
+    }) -join ' ')
 }
 
 function Start-Service-Bg($name, $port, $cmd, $arglist, $logFile) {
@@ -175,24 +188,19 @@ function Start-Service-Bg($name, $port, $cmd, $arglist, $logFile) {
     }
 
     if ($r.Kind -eq 'exe') {
-        Start-Process -FilePath $r.Path -ArgumentList $arglist `
+        Start-Process -FilePath $r.Path -ArgumentList (ConvertTo-NativeArgumentString $arglist) `
             -WindowStyle Hidden -RedirectStandardOutput $logPath `
             -RedirectStandardError "$logPath.err" | Out-Null
     } elseif ($r.Kind -eq 'cmd' -or $r.Kind -eq 'bat') {
-        # cmd.exe /c invokes the shim and respects PATHEXT. Always quote the
-        # shim path (it usually lives under "C:\Program Files\nodejs\..." with
-        # a space) and quote args that contain whitespace. Without quoting cmd
-        # splits at the space and reports "'C:\Program' is not recognized".
-        $quotedPath = '"' + $r.Path + '"'
-        $quotedArgs = $arglist | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
-        $cmdArgs = @('/c', $quotedPath) + $quotedArgs
+        # /s strips the outer quotes, preserving a quoted shim path under Program Files.
+        $cmdArgs = '/d /s /c "' + (ConvertTo-NativeArgumentString (@($r.Path) + $arglist)) + '"'
         Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArgs `
             -WindowStyle Hidden -RedirectStandardOutput $logPath `
             -RedirectStandardError "$logPath.err" | Out-Null
     } elseif ($r.Kind -eq 'ps1') {
         # Run the .ps1 shim via pwsh -File. Args after -File are passed through.
         $ps1Args = @('-NoProfile', '-File', $r.Path) + $arglist
-        Start-Process -FilePath 'pwsh.exe' -ArgumentList $ps1Args `
+        Start-Process -FilePath 'pwsh.exe' -ArgumentList (ConvertTo-NativeArgumentString $ps1Args) `
             -WindowStyle Hidden -RedirectStandardOutput $logPath `
             -RedirectStandardError "$logPath.err" | Out-Null
     } else {
@@ -201,19 +209,6 @@ function Start-Service-Bg($name, $port, $cmd, $arglist, $logFile) {
     }
     Write-Host "  + $name"
 }
-
-# Resolve the python interpreter — `python` on Windows usually maps to the
-# Microsoft Store launcher; `py -3` is the canonical launcher for installed
-# CPython. Prefer `python` only if it runs Python 3 directly.
-function Get-PythonCmd {
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        $pyVer = (& python -c "import sys; print(sys.version_info[0])" 2>$null)
-        if ($pyVer -eq '3') { return 'python' }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) { return 'py' }
-    return 'python'
-}
-$PY = Get-PythonCmd
 
 # Force UTF-8 stdio in child Python processes. The Windows console defaults to
 # cp1252; the Sutando services print Unicode arrows (→) at startup which would
@@ -269,7 +264,7 @@ if (-not $SkipTelegram -and (Test-Path (Join-Path $HOME '.claude\channels\telegr
         if ($PY -eq 'py') { $tgArgs = @('-3') + $tgArgs }
         if (-not (Test-BridgeRunning 'telegram-bridge')) {
             Write-Host "  Starting Telegram bridge..."
-            Start-Process -FilePath $PY -ArgumentList $tgArgs -WindowStyle Hidden `
+            Start-Process -FilePath $PY -ArgumentList (ConvertTo-NativeArgumentString $tgArgs) -WindowStyle Hidden `
                 -RedirectStandardOutput (Join-Path $LOGS_DIR 'telegram-bridge.log') `
                 -RedirectStandardError (Join-Path $LOGS_DIR 'telegram-bridge.log.err') | Out-Null
             Write-Host "  + telegram bridge"
@@ -288,7 +283,7 @@ if (-not $SkipDiscord -and (Test-Path (Join-Path $HOME '.claude\channels\discord
         if ($PY -eq 'py') { $dcArgs = @('-3') + $dcArgs }
         if (-not (Test-BridgeRunning 'discord-bridge')) {
             Write-Host "  Starting Discord bridge..."
-            Start-Process -FilePath $PY -ArgumentList $dcArgs -WindowStyle Hidden `
+            Start-Process -FilePath $PY -ArgumentList (ConvertTo-NativeArgumentString $dcArgs) -WindowStyle Hidden `
                 -RedirectStandardOutput (Join-Path $LOGS_DIR 'discord-bridge.log') `
                 -RedirectStandardError (Join-Path $LOGS_DIR 'discord-bridge.log.err') | Out-Null
             Write-Host "  + discord bridge"

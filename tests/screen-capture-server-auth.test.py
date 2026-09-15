@@ -210,15 +210,12 @@ test_load_rejects_wrong_permissions()
 # Downscale budget tests
 # ---------------------------------------------------------------------------
 
-def test_downscale_invokes_sips_with_bounds() -> None:
+def test_downscale_delegates_with_bounds() -> None:
     with tempfile.NamedTemporaryFile() as frame:
-        with unittest.mock.patch.object(sc.subprocess, "run") as run:
+        with unittest.mock.patch.object(sc, "_platform_resize_image", return_value=True) as resize:
             ok_result = sc._downscale_frame(frame.name, 1280, 60)
-        ok("downscale succeeds when sips succeeds", ok_result)
-        ok("downscale bounds reach sips", run.call_args.args[0] == [
-            "sips", "--resampleHeightWidthMax", "1280", "-s", "format",
-            "jpeg", "-s", "formatOptions", "60", frame.name,
-        ], f"got {run.call_args.args[0] if run.call_args else None}")
+        ok("downscale succeeds when platform resize succeeds", ok_result)
+        ok("downscale bounds reach platform resize", resize.call_args.args == (frame.name, 1280, 60))
 
 
 def test_downscale_failure_only_allows_small_original() -> None:
@@ -227,10 +224,10 @@ def test_downscale_failure_only_allows_small_original() -> None:
         small.flush()
         large.write(b"x" * (sc.DOWNSCALE_FAIL_MAX_BYTES + 1))
         large.flush()
-        with unittest.mock.patch.object(sc.subprocess, "run", side_effect=RuntimeError("sips failed")):
+        with unittest.mock.patch.object(sc, "_platform_resize_image", return_value=False):
             ok("downscale failure permits a small original", sc._downscale_frame(small.name, 1280, 60))
             ok("downscale failure rejects an over-budget original", not sc._downscale_frame(large.name, 1280, 60))
-    with unittest.mock.patch.object(sc.subprocess, "run", side_effect=RuntimeError("sips failed")), \
+    with unittest.mock.patch.object(sc, "_platform_resize_image", return_value=False), \
          unittest.mock.patch.object(sc.os.path, "getsize", side_effect=OSError("stat failed")):
         ok("downscale failure rejects an unreadable original", not sc._downscale_frame("missing.jpg", 1280, 60))
 
@@ -285,7 +282,7 @@ def test_notification_and_macos_display_delegate() -> None:
        f"got code={handler._response_code}")
 
 
-test_downscale_invokes_sips_with_bounds()
+test_downscale_delegates_with_bounds()
 test_downscale_failure_only_allows_small_original()
 test_capture_downscale_options_and_failure_are_visible()
 test_notification_and_macos_display_delegate()

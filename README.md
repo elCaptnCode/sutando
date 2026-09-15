@@ -194,7 +194,7 @@ Sutando started life on macOS and most of its app-automation surface — AppleSc
 - Capture screen + describe screen tools
 
 Dashboard and `/tasks/active` use platform process probes, not a fixed `pgrep` path.
-Missing process tools do not abort either response; the macOS-only Sutando app reports as not running on Windows.
+Unavailable process probes do not abort either response: the dashboard reports unavailable status and `/tasks/active` returns `null` for watcher state. The macOS-only Sutando app reports as not running on Windows.
 Proactive orphan recovery uses the shared, non-signalling process-identity probe:
 only confirmed dead owners release claims; live or uninspectable owners keep them.
 
@@ -246,6 +246,8 @@ The Windows scripts mirror their `.sh` twins:
 - Python 3.11+ from [python.org](https://python.org) (used by the dashboard, agent API, and bridges)
 - Claude Code installed and logged in (`claude` once)
 
+Fresh Windows installs use `npm ci --ignore-scripts` and require the shipped runtime build. Repository paths and workspace names may contain spaces and Unicode.
+
 **Workspace:** identical contract as macOS — defaults to `<repo>/workspace/`; override via `sutando.config.local.json` (see [docs/workspace-config.md](docs/workspace-config.md)).
 
 **What's not ported (and why):**
@@ -256,9 +258,11 @@ The Windows scripts mirror their `.sh` twins:
 
 **Task-loop architecture (Windows-specific).** macOS Claude Code exposes a `Monitor` tool that streams stdout from a long-running command (e.g. `bash src/watch-tasks-stream.sh`) and wakes the agent on every `TASK_FILE:` event. Claude Code 2.1.168 on Windows **does not include the `Monitor` tool** (verified: not in the agent's tool list, and the literal string `"Monitor"` is absent from `claude.exe`). Without Monitor, there's no push-based file-watch primitive available to the agent, so the long-running `sutando-core` TUI would only pick up new tasks on its `*/5` proactive-loop cron tick — fine for autonomous work, far too slow for chat.
 
-The Windows port works around this with `src/task-dispatcher.ps1`, a standalone process auto-launched by `src/startup.ps1`. It uses `FileSystemWatcher` to watch `tasks/`, claims new files via atomic rename, and runs each one through `claude --print` as a one-shot subprocess. End-to-end chat latency is ~5s. The long-running core still handles autonomous proactive-loop work + cron jobs; the dispatcher only intercepts user-driven chat tasks.
+The Windows port works around this with `src/task-dispatcher.ps1`, a standalone process auto-launched by `src/startup.ps1`. It uses `FileSystemWatcher` to watch `tasks/`, claims new files via atomic rename, and runs each one through `claude --print` as a one-shot subprocess. Each queued chat task starts as soon as the dispatcher is available; inference and delivery time depend on the model and connection. The long-running core still handles autonomous proactive-loop work + cron jobs; the dispatcher only intercepts user-driven chat tasks.
 
-**Trade-off:** each dispatched task is its own `claude --print` subprocess, so there's no shared conversational context across chat turns. If you say "what's the weather" and follow up with "and in Tokyo?", the second call won't know about the first. If you want continuity, opt out via `pwsh -File src/startup.ps1 -SkipDispatcher` and accept the cron-tick latency.
+**Task context and authorization:** owner turns and authenticated Discord collaborator turns resume a session per channel. Collaborators require both a verified task envelope and a current access entry. Other non-owner turns use `codex exec --sandbox read-only`; when Codex is unavailable, they are refused. Owner and collaborator turns in the same channel share conversational context.
+
+The dispatcher holds an exclusive lifetime lock and publishes results atomically. After a crash or forced restart, abandoned claims are archived with an interruption result instead of being retried: actions may already have run. Check their outcome before resubmitting. Restart stops the dispatcher process tree, including its in-flight CLI child.
 
 **Try saying:**
 - "What's on my screen?" — takes a screenshot and describes it

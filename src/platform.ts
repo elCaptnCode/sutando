@@ -111,7 +111,7 @@ export function clipboardRead(): string {
 		return execSync('pbpaste', { encoding: 'utf-8', timeout: 2_000 });
 	}
 	if (isWindows()) {
-		const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard'], {
+		const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::Out.Write((Get-Clipboard -Raw))'], {
 			timeout: 3_000,
 			encoding: 'utf-8',
 			windowsHide: true,
@@ -127,10 +127,8 @@ export function clipboardWrite(text: string): void {
 		return;
 	}
 	if (isWindows()) {
-		// Pipe through STDIN via $input automatic variable. Plain `Set-Clipboard`
-		// (without `-Value`) ignores stdin, so the empirically-confirmed idiom
-		// is `$input | Set-Clipboard`. Avoids command-line length limits + quoting.
-		spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '$input | Set-Clipboard'], {
+		// Read stdin as UTF-8 without normalizing newlines or interpolating text.
+		spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); Set-Clipboard -Value ([Console]::In.ReadToEnd())'], {
 			input: text,
 			encoding: 'utf-8',
 			timeout: 3_000,
@@ -254,9 +252,14 @@ export function openWithDefault(target: string): void {
 		return;
 	}
 	if (isWindows()) {
-		// `start` is a cmd.exe builtin. The empty "" preserves the title slot
-		// so a quoted path doesn't get interpreted as the window title.
-		spawnSync('cmd.exe', ['/c', 'start', '""', target], { timeout: 5_000, windowsHide: true });
+		// Keep the target out of shell source, including cmd metacharacters and expansions.
+		const script = '$ErrorActionPreference = "Stop"; ' +
+			'$start = [System.Diagnostics.ProcessStartInfo]::new(); ' +
+			'$start.FileName = $env:SUTANDO_OPEN_TARGET; $start.UseShellExecute = $true; ' +
+			'[System.Diagnostics.Process]::Start($start) | Out-Null';
+		execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+			timeout: 5_000, windowsHide: true, env: { ...process.env, SUTANDO_OPEN_TARGET: target },
+		});
 		return;
 	}
 	try { spawnSync('xdg-open', [target], { timeout: 5_000 }); } catch {}

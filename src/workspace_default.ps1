@@ -35,8 +35,15 @@ from src.sutando_config import resolve_workspace
 print(resolve_workspace(), end="")
 '@
     $previousRepo = $env:SUTANDO_RESOLVE_REPO
+    $previousPythonEncoding = $env:PYTHONIOENCODING
+    $previousPythonUtf8 = $env:PYTHONUTF8
+    $previousOutputEncoding = [Console]::OutputEncoding
     $env:SUTANDO_RESOLVE_REPO = $repo
     try {
+        # Workspace paths must survive both Python's stdout encoding and PowerShell's decoding.
+        $env:PYTHONIOENCODING = 'utf-8'
+        $env:PYTHONUTF8 = '1'
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         $candidates = @()
         $python = Get-Command python -ErrorAction SilentlyContinue
         if ($python) { $candidates += ,@($python.Source) }
@@ -55,20 +62,23 @@ print(resolve_workspace(), end="")
                 # Try the next interpreter.
             }
         }
+
+        if (Get-Command bash -ErrorAction SilentlyContinue) {
+            try {
+                $ws = (& bash $configScript workspace 2>$null)
+                if ($LASTEXITCODE -eq 0 -and $ws) {
+                    return $ws.Trim()
+                }
+            } catch {
+                # fall through to the in-repo default
+            }
+        }
+
+        return (Join-Path $repo 'workspace')
     } finally {
         $env:SUTANDO_RESOLVE_REPO = $previousRepo
+        $env:PYTHONIOENCODING = $previousPythonEncoding
+        $env:PYTHONUTF8 = $previousPythonUtf8
+        [Console]::OutputEncoding = $previousOutputEncoding
     }
-
-    if (Get-Command bash -ErrorAction SilentlyContinue) {
-        try {
-            $ws = (& bash $configScript workspace 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $ws) {
-                return $ws.Trim()
-            }
-        } catch {
-            # fall through to the in-repo default
-        }
-    }
-
-    return (Join-Path $repo 'workspace')
 }

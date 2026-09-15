@@ -66,7 +66,7 @@ if ($Background) {
     $stdoutLog = Join-Path $LOGS 'task-dispatcher.stdout.log'
     $stderrLog = Join-Path $LOGS 'task-dispatcher.stderr.log'
     Start-Process -FilePath $psExe.Source -ArgumentList @(
-        '-NoProfile', '-File', $PSCommandPath
+        '-NoProfile', '-File', ('"' + $PSCommandPath + '"')
     ) -WindowStyle Hidden `
       -RedirectStandardOutput $stdoutLog `
       -RedirectStandardError $stderrLog | Out-Null
@@ -74,16 +74,15 @@ if ($Background) {
     exit 0
 }
 
-# --- PID sentinel + single-instance guard -----------------------------------
+# The open handle is the ownership guard; PID files can outlive their process.
 $pidFile = Join-Path $WORKSPACE 'state\task-dispatcher.pid'
 New-Item -ItemType Directory -Force -Path (Split-Path $pidFile) | Out-Null
-if (Test-Path $pidFile) {
-    $stalePid = Get-Content $pidFile -ErrorAction SilentlyContinue
-    if ($stalePid -and (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)) {
-        Write-Host "task-dispatcher already running (pid $stalePid). Exiting."
-        exit 0
-    }
-    Remove-Item $pidFile -ErrorAction SilentlyContinue
+try {
+    $instanceLock = [IO.File]::Open("$pidFile.lock", [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+} catch [IO.IOException] {
+    Write-Host 'task-dispatcher already running or its lock is unavailable. Exiting.'
+    exit 0
 }
 Set-Content -Path $pidFile -Value $PID -NoNewline
 
@@ -102,6 +101,7 @@ if (-not $claudeCmd) { $claudeCmd = ($claudeAll | Select-Object -First 1) }
 if (-not $claudeCmd) {
     Log "ERROR: claude not found on PATH. Install Claude Code and retry."
     Remove-Item $pidFile -ErrorAction SilentlyContinue
+    $instanceLock.Dispose()
     exit 1
 }
 $CLAUDE = $claudeCmd.Source
@@ -113,6 +113,7 @@ Log "task-dispatcher started. claude=$CLAUDE codex=$(if ($CODEX) { $CODEX } else
 
 if ($ValidateOnly) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue
+    $instanceLock.Dispose()
     Write-Host "Windows task-dispatcher validation passed."
     exit 0
 }
@@ -334,6 +335,27 @@ function Claim-Task($file) {
     }
 }
 
+function Publish-TaskResult($taskId, $result) {
+    $destination = Join-Path $RESULTS "$taskId.txt"
+    $temporary = Join-Path $RESULTS ('.dispatcher-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($temporary, [string]$result, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, $destination, $true)
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+    }
+}
+
+function Resolve-InterruptedTask($claimedPath, $taskId) {
+    # A crashed worker may already have performed actions, so never replay its claim.
+    $resultFile = Join-Path $RESULTS "$taskId.txt"
+    if (-not (Test-Path -LiteralPath $resultFile)) {
+        Publish-TaskResult $taskId 'This task was interrupted. Its actions may have completed or may still be running; check the outcome before submitting it again.'
+    }
+    Move-Item -LiteralPath $claimedPath -Destination (Join-Path $ARCHIVE "$taskId.txt") -Force -ErrorAction Stop
+    Log "${taskId}: archived interrupted claim without retrying"
+}
+
 function Get-VerifiedDiscordCollaborator($claimedPath) {
     $candidates = @()
     $python = Get-Command python -ErrorAction SilentlyContinue
@@ -357,8 +379,7 @@ function Get-VerifiedDiscordCollaborator($claimedPath) {
 function Process-Task($claimedPath, $taskId) {
     $prompt = Get-TaskPrompt $claimedPath
     if (-not $prompt) {
-        Log "${taskId}: empty prompt, skipping"
-        return
+        throw "${taskId}: empty prompt"
     }
 
     # A verified Discord collaborator keeps the complete body and channel rulebook.
@@ -371,10 +392,9 @@ function Process-Task($claimedPath, $taskId) {
         Log "${taskId}: processing non-owner task in codex read-only sandbox (access_tier=$tier)"
         $result = Invoke-CodexSandbox $prompt $systemInstructions $taskId $tier "$claimedPath.stderr"
         $resultFile = Join-Path $RESULTS "$taskId.txt"
-        [System.IO.File]::WriteAllText($resultFile, [string]$result, [System.Text.UTF8Encoding]::new($false))
+        Publish-TaskResult $taskId $result
         $archived = Join-Path $ARCHIVE "$taskId.txt"
-        try { Move-Item -Path $claimedPath -Destination $archived -Force }
-        catch { Remove-Item -Path $claimedPath -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $claimedPath -Destination $archived -Force -ErrorAction Stop
         return
     }
 
@@ -513,18 +533,12 @@ $prompt
     # BOM so the Python bridges (read_text() = UTF-8) get clean bytes and a BOM
     # doesn't corrupt the first line.
     $resultFile = Join-Path $RESULTS "$taskId.txt"
-    [System.IO.File]::WriteAllText($resultFile, [string]$result, [System.Text.UTF8Encoding]::new($false))
+    Publish-TaskResult $taskId $result
     Log "${taskId}: done -> $resultFile"
 
     # Archive the task file so we don't reprocess it on rescan.
     $archived = Join-Path $ARCHIVE "$taskId.txt"
-    try {
-        Move-Item -Path $claimedPath -Destination $archived -Force
-    } catch {
-        Log "${taskId}: archive failed: $_"
-        # Last resort: delete so we don't loop on it.
-        Remove-Item -Path $claimedPath -ErrorAction SilentlyContinue
-    }
+    Move-Item -LiteralPath $claimedPath -Destination $archived -Force -ErrorAction Stop
 }
 
 # --- Watch loop --------------------------------------------------------------
@@ -545,13 +559,18 @@ function Drain-Pending {
             Process-Task $claimed $taskId
         } catch {
             Log "${taskId}: uncaught exception: $_"
+            if (Test-Path -LiteralPath $claimed) {
+                Resolve-InterruptedTask $claimed $taskId
+            }
         }
     }
 }
 
-Drain-Pending
-
 try {
+    Get-ChildItem -Path $TASKS -File -Filter 'task-*.txt.processing' | ForEach-Object {
+        Resolve-InterruptedTask $_.FullName ($_.Name -replace '\.txt\.processing$', '')
+    }
+    Drain-Pending
     while ($true) {
         # WaitForChanged blocks until an FS event or timeout (2s). Timeout
         # exists so we can drain anything the watcher missed in a burst.
@@ -567,5 +586,6 @@ try {
 } finally {
     $watcher.Dispose()
     if (Test-Path $pidFile) { Remove-Item $pidFile -ErrorAction SilentlyContinue }
+    $instanceLock.Dispose()
     Log "task-dispatcher stopped."
 }

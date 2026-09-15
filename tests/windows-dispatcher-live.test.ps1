@@ -12,28 +12,23 @@ $shimDir = Join-Path $workspace 'bin'
 $errorModeFile = Join-Path $workspace 'fake-error-mode'
 $staleModeFile = Join-Path $workspace 'fake-stale-once'
 $codexModeFile = Join-Path $workspace 'fake-codex-mode'
+$blockModeFile = Join-Path $workspace 'fake-block-mode'
+$childPidFile = Join-Path $workspace 'fake-child.pid'
 $dispatcherPid = 0
 $oldPath = $env:PATH
 $oldTestMode = $env:SUTANDO_TEST_MODE
 $oldWorkspace = $env:SUTANDO_WORKSPACE
 $oldConfigRoot = $env:CLAUDE_CONFIG_DIR
 
-function Stop-ProcessTree([int]$rootPid) {
-    $all = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
-    $queue = @($rootPid)
-    $ordered = @()
-    while ($queue.Count) {
-        $current = $queue[0]
-        if ($queue.Count -gt 1) { $queue = @($queue[1..($queue.Count - 1)]) }
-        else { $queue = @() }
-        $ordered += $current
-        $queue += @($all | Where-Object ParentProcessId -eq $current | ForEach-Object ProcessId)
-    }
-    [array]::Reverse($ordered)
-    foreach ($processId in $ordered) {
-        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    }
-}
+# Import only the production stop primitive; never run machine-wide service discovery.
+$restartAst = [Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $repo 'src\restart.ps1'), [ref]$null, [ref]$null)
+$stopFunction = $restartAst.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Stop-SutandoProcessTree'
+}, $true)
+if (-not $stopFunction) { throw 'Missing production process-tree stop function' }
+Invoke-Expression $stopFunction.Extent.Text
 
 function Wait-ForPath([string]$path, [int]$seconds = 30) {
     $deadline = (Get-Date).AddSeconds($seconds)
@@ -67,6 +62,9 @@ try {
     New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
     $shim = @'
 @echo off
+if exist "%SUTANDO_FAKE_BLOCK_FILE%" (
+  pwsh -NoProfile -Command "[IO.File]::WriteAllText($env:SUTANDO_FAKE_CHILD_PID, [string]$PID); Start-Sleep -Seconds 120"
+)
 if exist "%SUTANDO_FAKE_STALE_FILE%" (
   echo %* | findstr /C:"--resume" >nul
   if not errorlevel 1 (
@@ -109,18 +107,29 @@ exit 0
     $env:SUTANDO_FAKE_ERROR_FILE = $errorModeFile
     $env:SUTANDO_FAKE_STALE_FILE = $staleModeFile
     $env:SUTANDO_FAKE_CODEX_FILE = $codexModeFile
+    $env:SUTANDO_FAKE_BLOCK_FILE = $blockModeFile
+    $env:SUTANDO_FAKE_CHILD_PID = $childPidFile
 
     New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'state') | Out-Null
     Set-Content -Path (Join-Path $workspace 'state\dispatcher-sessions.json') `
         -Value '{"windows-ci":"stale-windows-session"}' -Encoding ascii
     New-Item -ItemType File -Path $staleModeFile | Out-Null
+    $pidFile = Join-Path $workspace 'state\task-dispatcher.pid'
+    Set-Content -Path $pidFile -Value $PID -NoNewline
 
     & pwsh -NoProfile -File (Join-Path $repo 'src\task-dispatcher.ps1') -Background
     if ($LASTEXITCODE -ne 0) { throw "dispatcher launch exited $LASTEXITCODE" }
 
     $pidFile = Join-Path $workspace 'state\task-dispatcher.pid'
     Wait-ForPath $pidFile
+    $deadline = (Get-Date).AddSeconds(30)
+    while ([int](Get-Content $pidFile) -eq $PID -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+    }
     $dispatcherPid = [int](Get-Content $pidFile)
+    if ($dispatcherPid -eq $PID) { throw 'Reused sentinel PID prevented dispatcher startup' }
+    & pwsh -NoProfile -File (Join-Path $repo 'src\task-dispatcher.ps1') -ValidateOnly
+    if ([int](Get-Content $pidFile) -ne $dispatcherPid) { throw 'Second dispatcher bypassed instance lock' }
     if (-not (Get-Process -Id $dispatcherPid -ErrorAction SilentlyContinue)) {
         throw "dispatcher PID $dispatcherPid is not alive"
     }
@@ -184,7 +193,46 @@ exit 0
         throw "structured error was not preserved: $errorBody"
     }
 
+    Remove-Item $errorModeFile
+    New-Item -ItemType File -Path $blockModeFile | Out-Null
+    $interruptedId = "task-windows-interrupted-$PID"
+    Write-Task $interruptedId 'Wait for the restart test.' 'owner'
+    Wait-ForPath $childPidFile
+    $childPid = [int](Get-Content $childPidFile)
+    Stop-SutandoProcessTree $dispatcherPid
+    if (Get-Process -Id $childPid -ErrorAction SilentlyContinue) {
+        throw 'Production restart primitive left a dispatcher descendant running'
+    }
+    Remove-Item $blockModeFile
+    & pwsh -NoProfile -File (Join-Path $repo 'src\task-dispatcher.ps1') -Background
+    $deadline = (Get-Date).AddSeconds(30)
+    $previousPid = $dispatcherPid
+    while ((Get-Date) -lt $deadline) {
+        $currentPid = [int](Get-Content $pidFile -ErrorAction SilentlyContinue)
+        if ($currentPid -and $currentPid -ne $previousPid) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    $dispatcherPid = $currentPid
+    $interruptedResult = Join-Path $workspace "results\$interruptedId.txt"
+    Wait-ForPath $interruptedResult
+    Wait-ForPath (Join-Path $workspace "tasks\archive\$interruptedId.txt")
+    if ((Get-Content $interruptedResult -Raw) -notlike 'This task was interrupted.*') {
+        throw 'Interrupted task was replayed or did not receive an explicit outcome'
+    }
+    $afterRestartId = "task-windows-after-restart-$PID"
+    Write-Task $afterRestartId 'Return the post-restart marker.' 'owner'
+    $afterRestartResult = Join-Path $workspace "results\$afterRestartId.txt"
+    Wait-ForPath $afterRestartResult
+    if ((Get-Content $afterRestartResult -Raw).Trim() -ne 'WINDOWS_OWNER_OK') {
+        throw 'Post-restart task did not complete'
+    }
+
     [pscustomobject]@{
+        interrupted_claim_archived = $true
+        restart_descendants_stopped = $true
+        post_restart_result = 'WINDOWS_OWNER_OK'
+        reused_pid_ignored = $true
+        duplicate_dispatcher_blocked = $true
         dispatcher_pid = $dispatcherPid
         dispatcher_alive = $true
         owner_result = $ownerBody
@@ -199,7 +247,7 @@ exit 0
     } | ConvertTo-Json -Compress
 } finally {
     if ($dispatcherPid) {
-        Stop-ProcessTree $dispatcherPid
+        Stop-SutandoProcessTree $dispatcherPid
     }
     $env:PATH = $oldPath
     $env:SUTANDO_TEST_MODE = $oldTestMode
@@ -208,6 +256,8 @@ exit 0
     Remove-Item Env:SUTANDO_FAKE_ERROR_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:SUTANDO_FAKE_STALE_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:SUTANDO_FAKE_CODEX_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:SUTANDO_FAKE_BLOCK_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:SUTANDO_FAKE_CHILD_PID -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     if (Test-Path -LiteralPath $workspace) {
         $resolved = (Resolve-Path -LiteralPath $workspace).Path

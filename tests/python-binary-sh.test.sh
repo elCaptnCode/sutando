@@ -485,5 +485,22 @@ if [ "$loops" -gt 0 ] && [ "$unguarded" -eq 0 ]; then
   ok "all $loops interpreter-probe loop(s) neutralise their bare python3 candidate"
 fi
 
+for test_shell in sh dash; do
+  command -v "$test_shell" >/dev/null 2>&1 || continue
+  out=$("$test_shell" -c '
+    . "$1/scripts/python-binary.sh" || exit
+    _sutando_safe_path_pythons() { printf "%s\n" "" "/tmp/python with spaces"; }
+    _sutando_safe_path_python
+  ' resolver "$REPO")
+  check "$test_shell can source and resolve a spaced candidate" "$out" "/tmp/python with spaces"
+  out=$("$test_shell" -c '
+    . "$1/scripts/python-binary.sh" || exit
+    _sutando_safe_path_pythons() { :; }
+    _sutando_safe_path_python
+    resolve_python_for_module /nonexistent sutando_missing_module
+  ' resolver "$REPO")
+  check "$test_shell handles no candidates" "$out" ""
+done
+
 printf "\npassed=%d failed=%d\n" "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -13,6 +13,10 @@ $ErrorActionPreference = 'Continue'
 
 $REPO = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
+function Stop-SutandoProcessTree([int]$ProcessId) {
+    & taskkill /PID $ProcessId /T /F 2>$null | Out-Null
+}
+
 Write-Host "Stopping Sutando services..."
 
 $patterns = @(
@@ -36,7 +40,7 @@ foreach ($pat in $patterns) {
         Get-CimInstance Win32_Process | Where-Object {
             $_.CommandLine -and $_.CommandLine.ToLower().Contains($needle)
         } | ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Stop-SutandoProcessTree $_.ProcessId
         }
     } catch {}
 }
@@ -50,7 +54,7 @@ try {
         $_.CommandLine -match 'claude' -and
         $_.CommandLine -match 'sutando-core'
     } | ForEach-Object {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        Stop-SutandoProcessTree $_.ProcessId
     }
 } catch {}
 

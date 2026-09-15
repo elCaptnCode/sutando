@@ -63,10 +63,10 @@ class HttpProcessProbes(unittest.TestCase):
     def test_dashboard_process_status_delegates_in_both_directions(self):
         for pids, expected in (([], "Sutando app not running"), (["42"], "Sutando app running")):
             with self.subTest(pids=pids), patch.object(
-                self.dashboard, "find_pids", return_value=pids, create=True
+                self.dashboard, "probe_pids", return_value=(pids, True), create=True
             ) as probe:
                 handler, body = get(self.dashboard, "/")
-                probe.assert_called_once_with("(Sutando|MacOS)/Sutando")
+                probe.assert_called_once_with("(Sutando|MacOS)/Sutando", timeout=3.0)
                 self.assertIn(expected, body)
                 self.assertIn("<h2>Schedules</h2>", body)
                 handler.send_header.assert_any_call("Content-Type", "text/html; charset=utf-8")
@@ -74,10 +74,10 @@ class HttpProcessProbes(unittest.TestCase):
     def test_active_tasks_process_status_delegates_in_both_directions(self):
         for pids in ([], ["42"]):
             with self.subTest(pids=pids), patch.object(
-                self.api, "find_pids", return_value=pids, create=True
+                self.api, "probe_pids", return_value=(pids, True), create=True
             ) as probe:
                 handler, body = get(self.api, "/tasks/active")
-                probe.assert_called_once_with("watch-tasks")
+                probe.assert_called_once_with("watch-tasks", timeout=3.0)
                 self.assertEqual(json.loads(body), {
                     "tasks": [], "watcher": bool(pids), "claude": False, "questions": [],
                 })
@@ -86,9 +86,22 @@ class HttpProcessProbes(unittest.TestCase):
 
     def test_missing_process_tools_do_not_abort_either_route(self):
         _, dashboard = get(self.dashboard, "/")
-        self.assertIn("Sutando app not running", dashboard)
+        self.assertIn("Sutando app status unavailable", dashboard)
         _, active = get(self.api, "/tasks/active")
-        self.assertFalse(json.loads(active)["watcher"])
+        self.assertIsNone(json.loads(active)["watcher"])
+
+    def test_timed_out_process_probes_report_unknown(self):
+        import subprocess
+        def run(args, **kwargs):
+            if args[0] in ("pgrep", "powershell.exe"):
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            raise FileNotFoundError(args[0])
+
+        with patch("subprocess.run", side_effect=run):
+            _, dashboard = get(self.dashboard, "/")
+            self.assertIn("Sutando app status unavailable", dashboard)
+            _, active = get(self.api, "/tasks/active")
+            self.assertIsNone(json.loads(active)["watcher"])
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ def clipboard_write(text: str) -> None:
 
 # ---------- Process listing / killing ----------
 
-WINDOWS_CIM_TIMEOUT = 15.0
+WINDOWS_CIM_TIMEOUT = 30.0
 
 
 def process_executable(pid: str | int) -> str | None:
@@ -223,7 +223,7 @@ def process_snapshot() -> str | None:
         return None
 
 
-def probe_pids(pattern: str) -> tuple[list[str], bool]:
+def probe_pids(pattern: str, *, timeout: float | None = None) -> tuple[list[str], bool]:
     """Return matching PIDs and whether process enumeration succeeded.
 
     macOS/Linux: `pgrep -f <pattern>` (pattern is a regex, per pgrep).
@@ -237,7 +237,7 @@ def probe_pids(pattern: str) -> tuple[list[str], bool]:
     """
     try:
         if is_macos() or is_linux():
-            r = subprocess.run(["pgrep", "-f", pattern], timeout=3.0, capture_output=True, text=True, check=False)
+            r = subprocess.run(["pgrep", "-f", pattern], timeout=3.0 if timeout is None else timeout, capture_output=True, text=True, check=False)
             if r.returncode not in (0, 1):
                 return [], False
             pids = [p for p in (r.stdout or "").strip().split("\n") if p]
@@ -262,7 +262,7 @@ def probe_pids(pattern: str) -> tuple[list[str], bool]:
             sentinel = "__sutando_find_pids__"
             script = (
                 f"# {sentinel}\n"
-                "Get-CimInstance Win32_Process | "
+                "Get-CimInstance Win32_Process -ErrorAction Stop | "
                 "Where-Object { $_.CommandLine -and $_.ProcessId -ne $PID } | "
                 "ForEach-Object { $cl = $_.CommandLine.ToLower().Trim(); "
                 "$cl = $cl.Trim('\"').Trim(\"'\"); "
@@ -270,7 +270,7 @@ def probe_pids(pattern: str) -> tuple[list[str], bool]:
             )
             r = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                timeout=WINDOWS_CIM_TIMEOUT,
+                timeout=WINDOWS_CIM_TIMEOUT if timeout is None else timeout,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -285,9 +285,9 @@ def probe_pids(pattern: str) -> tuple[list[str], bool]:
     return [], False
 
 
-def find_pids(pattern: str) -> list[str]:
+def find_pids(pattern: str, *, timeout: float | None = None) -> list[str]:
     """Return matching process IDs; preserve the legacy empty-on-failure API."""
-    return probe_pids(pattern)[0]
+    return probe_pids(pattern, timeout=timeout)[0]
 
 
 def is_process_running(pattern: str) -> bool:
@@ -402,6 +402,57 @@ def capture_screen(out_path: str, fmt: str = "png") -> bool:
     except Exception:
         pass
     return False
+
+
+def resize_image(path: str, maxdim: int | None, quality: int | None) -> bool:
+    """Resize/recompress an image in place, returning whether conversion succeeded."""
+    try:
+        if not is_windows():
+            cmd = ["sips"]
+            if maxdim:
+                cmd += ["--resampleHeightWidthMax", str(maxdim)]
+            if quality:
+                cmd += ["-s", "format", "jpeg", "-s", "formatOptions", str(quality)]
+            subprocess.run(cmd + [path], timeout=10, capture_output=True, check=True)
+            return True
+        import tempfile
+        target = Path(path)
+        with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+            output = Path(tmp) / "resized"
+            safe_input = str(target.resolve()).replace("'", "''")
+            safe_output = str(output.resolve()).replace("'", "''")
+            script = (
+                "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Drawing; "
+                f"$src = [System.Drawing.Image]::FromFile('{safe_input}'); "
+                "$dst = $null; $g = $null; $params = $null; try { "
+                f"$limit = {int(maxdim or 0)}; $quality = {int(quality or 0)}; "
+                "$scale = 1.0; if ($limit -gt 0) { "
+                "$scale = [Math]::Min(1.0, $limit / [double][Math]::Max($src.Width, $src.Height)) }; "
+                "$w = [Math]::Max(1, [int][Math]::Floor($src.Width * $scale)); "
+                "$h = [Math]::Max(1, [int][Math]::Floor($src.Height * $scale)); "
+                "$dst = [System.Drawing.Bitmap]::new($w, $h); "
+                "$g = [System.Drawing.Graphics]::FromImage($dst); "
+                "$g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; "
+                "$g.DrawImage($src, 0, 0, $w, $h); "
+                "if ($quality -gt 0) { "
+                "$codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | "
+                "Where-Object { $_.MimeType -eq 'image/jpeg' }; "
+                "$params = [System.Drawing.Imaging.EncoderParameters]::new(1); "
+                "$params.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new("
+                "[System.Drawing.Imaging.Encoder]::Quality, [long]$quality); "
+                f"$dst.Save('{safe_output}', $codec, $params) "
+                f"}} else {{ $dst.Save('{safe_output}', $src.RawFormat) }} "
+                "} finally { if ($params) { $params.Dispose() }; if ($g) { $g.Dispose() }; "
+                "if ($dst) { $dst.Dispose() }; $src.Dispose() }"
+            )
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                timeout=10, capture_output=True, check=True,
+            )
+            os.replace(output, target)
+        return True
+    except Exception:
+        return False
 
 
 # ---------- Open with default handler ----------

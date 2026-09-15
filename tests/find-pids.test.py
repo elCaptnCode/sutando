@@ -68,7 +68,9 @@ class TestFindPids(unittest.TestCase):
     def test_nonexistent_pattern_returns_empty(self):
         # The query tags itself and skips $PID, so this literal cannot self-match
         # and is unlikely to occur in another process.
-        self.assertEqual(self.mod.find_pids("nopE_no_such_proc_7Xq"), [])
+        pids, available = self.mod.probe_pids("nopE_no_such_proc_7Xq")
+        self.assertTrue(available, "process enumeration failed; absence was not established")
+        self.assertEqual(pids, [])
 
     # A spawned child with a unique trailing marker is found by that marker.
     def test_finds_spawned_child_by_marker(self):
@@ -116,7 +118,17 @@ class TestFindPids(unittest.TestCase):
                 mock.patch.object(self.mod, "is_windows", return_value=True), \
                 mock.patch.object(self.mod.subprocess, "run", return_value=completed) as run:
             self.assertEqual(self.mod.find_pids("marker"), ["4242"])
-        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 15)
+        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 30)
+
+    def test_windows_probe_timeout_is_unknown_and_budget_is_configurable(self):
+        with mock.patch.object(self.mod, "is_macos", return_value=False), \
+                mock.patch.object(self.mod, "is_linux", return_value=False), \
+                mock.patch.object(self.mod, "is_windows", return_value=True), \
+                mock.patch.object(self.mod.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 3)) as run:
+            self.assertEqual(self.mod.probe_pids("marker", timeout=3), ([], False))
+            self.assertEqual(run.call_args.kwargs["timeout"], 3)
+            self.assertIn("-ErrorAction Stop", run.call_args.args[0][-1])
+            self.assertEqual(self.mod.find_pids("marker", timeout=3), [])
 
     def test_probe_pids_distinguishes_no_match_from_failure(self):
         no_match = subprocess.CompletedProcess([], 0, stdout="", stderr="")
@@ -169,7 +181,7 @@ class TestFindPids(unittest.TestCase):
             snapshot = self.mod.process_snapshot()
         self.assertIn(
             "4242 7 C:\\Program Files\\Python\\python.exe bridge.py", snapshot)
-        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 15)
+        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 30)
 
     def test_process_snapshot_distinguishes_empty_success_from_failure(self):
         ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")

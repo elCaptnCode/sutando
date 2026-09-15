@@ -27,7 +27,7 @@ from pathlib import Path
 # Cross-platform OS helpers. `sutando_platform.notify` + `sutando_platform.capture_screen`
 # branch on sys.platform so the legacy macOS code paths stay verbatim.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sutando_platform import capture_screen as _platform_capture_screen, notify as _platform_notify, is_macos, is_windows  # noqa: E402
+from sutando_platform import capture_screen as _platform_capture_screen, notify as _platform_notify, resize_image as _platform_resize_image, is_macos, is_windows  # noqa: E402
 
 PORT = 7845
 # Per-user temp dir — same treatment as browser.mjs in this PR: a shared
@@ -178,26 +178,13 @@ DOWNSCALE_FAIL_MAX_BYTES = 400 * 1024
 
 
 def _downscale_frame(path: str, maxdim: int | None, quality: int | None) -> bool:
-    """P7 D7.4: resize/recompress a captured frame IN THIS PROCESS via sips.
-
-    Runs before the path is returned to the caller, so the voice event loop
-    only ever touches the already-shrunk file. Returns False when the frame
-    could not be brought under budget (sips failed AND the original exceeds
-    DOWNSCALE_FAIL_MAX_BYTES) — the caller must error, not pass it through."""
-    cmd = ["sips"]
-    if maxdim:
-        cmd += ["--resampleHeightWidthMax", str(maxdim)]
-    if quality:
-        cmd += ["-s", "format", "jpeg", "-s", "formatOptions", str(quality)]
-    cmd.append(path)
-    try:
-        subprocess.run(cmd, timeout=10, capture_output=True, check=True)
+    """Enforce the frame budget before returning its path to the voice caller."""
+    if _platform_resize_image(path, maxdim, quality):
         return True
+    try:
+        return os.path.getsize(path) <= DOWNSCALE_FAIL_MAX_BYTES
     except Exception:
-        try:
-            return os.path.getsize(path) <= DOWNSCALE_FAIL_MAX_BYTES
-        except Exception:
-            return False
+        return False
 
 
 def _notify_capture():

@@ -134,9 +134,12 @@ _sutando_safe_path_pythons() {
 # Echo the first safe PATH interpreter, or NOTHING.
 _sutando_safe_path_python() {
 	while IFS= read -r _candidate_path; do
+		[ -n "$_candidate_path" ] || continue
 		printf '%s' "$_candidate_path"
 		return 0
-	done < <(_sutando_safe_path_pythons)
+	done <<_SUTANDO_PYTHONS
+$(_sutando_safe_path_pythons)
+_SUTANDO_PYTHONS
 	return 0
 }
 
@@ -165,11 +168,14 @@ resolve_python_for_module() {
 	done
 
 	while IFS= read -r _cand; do
+		[ -n "$_cand" ] || continue
 		if "$_cand" -c "import $_mod" >/dev/null 2>&1; then
 			printf '%s' "$_cand"
 			return 0
 		fi
-	done < <(_sutando_safe_path_pythons)
+	done <<_SUTANDO_PYTHONS
+$(_sutando_safe_path_pythons)
+_SUTANDO_PYTHONS
 	return 0
 }
 

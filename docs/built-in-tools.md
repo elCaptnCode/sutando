@@ -29,6 +29,8 @@ stream, pull or push) are bounded first: anything over 200 KB is resampled to a
 unbounded frame delays speech, not just vision. Reading a captured file from disk
 is unaffected — the bound applies only on the way into a session.
 
+**Windows platform tools** — `open_file` uses Windows ShellExecute with a literal target; characters such as `&`, `%`, and apostrophes are not interpreted as commands. Missing handlers return an error. Clipboard reads and writes preserve Unicode and multiline text through UTF-8. `pwsh -File src/notify.ps1 "message"` delegates Discord delivery to the shared owner-resolution and send policy, honoring the configured Claude home. Voice frames use Windows image resizing before the same frame-size limit is applied.
+
 **Notes** — the user's second brain. Save and retrieve notes:
 - Save: write to `notes/{slug}.md` with a descriptive filename
 - Retrieve: search notes with `Glob("notes/**/*.md")` or `Grep` for content
