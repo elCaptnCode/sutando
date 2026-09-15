@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from file_lock import locked_file
+from atomic_replace import replace_snapshot
 
 ARMED = "armed"
 EXPIRED = "expired"
@@ -47,8 +47,6 @@ PROBE_FAILED = "probe-failed"
 MAX_PINS = 32
 _FIELD_MAX = 500
 _REQUIRED = ("service", "pid", "lstart", "reason", "expires_at")
-_WINDOWS_REPLACE_ATTEMPTS = 50
-_WINDOWS_REPLACE_DELAY_S = 0.01
 
 
 def load_pins(path) -> list:
@@ -112,21 +110,10 @@ def save_pins(path, pins: list) -> None:
     tmp = target.with_name(f".{target.name}.tmp-{os.getpid()}-{os.urandom(4).hex()}")
     try:
         tmp.write_text(payload)
-        _replace_snapshot(tmp, target)
+        replace_snapshot(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
 
-
-def _replace_snapshot(tmp: Path, target: Path) -> None:
-    """Publish atomically, retrying transient Windows sharing violations."""
-    for attempt in range(_WINDOWS_REPLACE_ATTEMPTS):
-        try:
-            os.replace(tmp, target)
-            return
-        except PermissionError:
-            if os.name != "nt" or attempt + 1 == _WINDOWS_REPLACE_ATTEMPTS:
-                raise
-            time.sleep(_WINDOWS_REPLACE_DELAY_S)
 
 
 def _load_strict(path) -> list:

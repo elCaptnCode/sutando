@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
 import pending_questions_triage as triage  # noqa: E402
+import atomic_replace  # noqa: E402
 from util_paths import _host_label  # noqa: E402 — needs the sys.path above
 
 
@@ -277,6 +278,42 @@ class Dismissal(unittest.TestCase):
                 triage.save_dismissed(self.store, {"Qnew"})
         self.assertEqual([], list(self.store.parent.glob("*.tmp")))
         self.assertEqual({"Qkeep"}, triage.load_dismissed(self.store))
+
+    def test_windows_transient_reader_sharing_violation_recovers(self):
+        triage.dismiss(self.store, "seed")
+        real_replace = atomic_replace.os.replace
+        fake_os = mock.Mock(wraps=atomic_replace.os)
+        fake_os.name = "nt"
+        attempts = 0
+
+        def replace(source, target):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("reader holds target")
+            return real_replace(source, target)
+
+        with mock.patch.object(atomic_replace, "os", fake_os), \
+                mock.patch.object(fake_os, "replace", side_effect=replace), \
+                mock.patch.object(atomic_replace.time, "sleep") as sleep:
+            self.assertEqual(triage.dismiss(self.store, "new"), {"seed", "new"})
+        self.assertEqual(triage.load_dismissed(self.store), {"seed", "new"})
+        self.assertEqual([], list(self.store.parent.glob("*.tmp")))
+        sleep.assert_called_once_with(atomic_replace._WINDOWS_REPLACE_DELAY_S)
+
+    def test_windows_terminal_sharing_violation_retains_store_and_cleans_temp(self):
+        triage.dismiss(self.store, "seed")
+        fake_os = mock.Mock(wraps=atomic_replace.os)
+        fake_os.name = "nt"
+        with mock.patch.object(atomic_replace, "os", fake_os), \
+                mock.patch.object(fake_os, "replace", side_effect=PermissionError("reader holds target")) as replace, \
+                mock.patch.object(atomic_replace.time, "sleep") as sleep:
+            with self.assertRaises(PermissionError):
+                triage.dismiss(self.store, "new")
+        self.assertEqual(replace.call_count, atomic_replace._WINDOWS_REPLACE_ATTEMPTS)
+        self.assertEqual(sleep.call_count, atomic_replace._WINDOWS_REPLACE_ATTEMPTS - 1)
+        self.assertEqual(triage.load_dismissed(self.store), {"seed"})
+        self.assertEqual([], list(self.store.parent.glob("*.tmp")))
 
     def test_only_the_dismissed_row_is_removed(self):
         rows = [_row("Q1"), _row("Q2"), _row("Q3")]

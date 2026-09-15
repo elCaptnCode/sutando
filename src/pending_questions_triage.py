@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from file_lock import locked_file
+from atomic_replace import replace_snapshot
 
 # A reference carrying its own repository: `owner/repo#123`, or a github.com pull/
 # issue URL. These are the only ones whose repository is known from the text alone.
@@ -212,7 +213,7 @@ def save_dismissed(path, ids: Iterable[str]) -> None:
             out.write(payload)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(tmp, path)
+        replace_snapshot(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)

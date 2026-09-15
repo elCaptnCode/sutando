@@ -30,6 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 import process_pins  # noqa: E402
+import atomic_replace  # noqa: E402
 
 GOOD = {"service": "discord-bridge", "pid": "123",
         "lstart": "Sat Aug 23 12:24:57 2026",
@@ -151,8 +152,8 @@ class WriterValidatesAndBounds(unittest.TestCase):
         self.assertEqual(process_pins.load_pins(self.path), [])  # reader fails open
 
     def test_windows_replace_retries_a_transient_sharing_violation(self) -> None:
-        real_replace = process_pins.os.replace
-        fake_os = mock.Mock(wraps=process_pins.os)
+        real_replace = atomic_replace.os.replace
+        fake_os = mock.Mock(wraps=atomic_replace.os)
         fake_os.name = "nt"
         calls = 0
 
@@ -163,27 +164,27 @@ class WriterValidatesAndBounds(unittest.TestCase):
                 raise PermissionError("sharing violation")
             return real_replace(source, destination)
 
-        with mock.patch.object(process_pins, "os", fake_os), \
+        with mock.patch.object(atomic_replace, "os", fake_os), \
                 mock.patch.object(fake_os, "replace", side_effect=transient), \
-                mock.patch.object(process_pins.time, "sleep") as sleep:
+                mock.patch.object(atomic_replace.time, "sleep") as sleep:
             process_pins.save_pins(self.path, [GOOD])
         self.assertEqual(process_pins.load_pins(self.path), [GOOD])
-        sleep.assert_called_once_with(process_pins._WINDOWS_REPLACE_DELAY_S)
+        sleep.assert_called_once_with(atomic_replace._WINDOWS_REPLACE_DELAY_S)
 
     def test_windows_replace_retry_is_bounded_and_raises(self) -> None:
-        fake_os = mock.Mock(wraps=process_pins.os)
+        fake_os = mock.Mock(wraps=atomic_replace.os)
         fake_os.name = "nt"
-        with mock.patch.object(process_pins, "os", fake_os), \
+        with mock.patch.object(atomic_replace, "os", fake_os), \
                 mock.patch.object(
                     fake_os, "replace",
                     side_effect=PermissionError("sharing violation")) as replace, \
-                mock.patch.object(process_pins.time, "sleep") as sleep, \
+                mock.patch.object(atomic_replace.time, "sleep") as sleep, \
                 self.assertRaises(PermissionError):
             process_pins.save_pins(self.path, [GOOD])
         self.assertEqual(
-            replace.call_count, process_pins._WINDOWS_REPLACE_ATTEMPTS)
+            replace.call_count, atomic_replace._WINDOWS_REPLACE_ATTEMPTS)
         self.assertEqual(
-            sleep.call_count, process_pins._WINDOWS_REPLACE_ATTEMPTS - 1)
+            sleep.call_count, atomic_replace._WINDOWS_REPLACE_ATTEMPTS - 1)
 
     def test_16_simultaneous_unique_arms_ALL_persist(self) -> None:
         procs = [multiprocessing.Process(target=_arm_one,
