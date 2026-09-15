@@ -146,6 +146,11 @@ test('instructions: injected seams land where tuned', () => {
 	assert.ok(instructions.includes('- Google Search for current-info queries'), 'googleSearch=true line');
 });
 
+test('instructions identify the actual host platform', () => {
+	const expectedHost = process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows' : process.platform;
+	assert.ok(instructions.includes(`owner's local ${expectedHost}`));
+});
+
 test('instructions: googleSearch=false omits the search line (capability honesty)', () => {
 	const off = cfg.buildInstructions(ctx({ googleSearch: false }), OVERRIDES);
 	assert.ok(!off.includes('- Google Search for current-info queries'));
