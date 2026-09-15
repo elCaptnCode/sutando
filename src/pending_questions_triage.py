@@ -179,8 +179,8 @@ def _locked_for_dismiss(path):
     set, each add their own id in memory, and each write — the second write wins
     outright and silently drops the first id (review finding: two calls reading
     {seed} in parallel both "succeed"; final store [Q2, seed], Q1 lost). The lock
-    is on a sidecar file next to the store, not the store itself, so a reader
-    (`load_dismissed`) is never blocked by a writer holding it.
+    is on a stable sidecar. Windows readers share it because opening a file
+    during replacement can fail; POSIX readers use atomic snapshots directly.
     """
     path = Path(path) if not isinstance(path, Path) else path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,6 +191,16 @@ def _locked_for_dismiss(path):
 
 def load_dismissed(path) -> set[str]:
     """Dismissed question ids. A missing or unreadable store means none."""
+    try:
+        if os.name == "nt":
+            with _locked_for_dismiss(path):
+                return _load_dismissed_unlocked(path)
+        return _load_dismissed_unlocked(path)
+    except OSError:
+        return set()
+
+
+def _load_dismissed_unlocked(path) -> set[str]:
     try:
         with open(path, "r") as handle:
             data = json.load(handle)
@@ -203,7 +213,7 @@ def load_dismissed(path) -> set[str]:
 
 
 def save_dismissed(path, ids: Iterable[str]) -> None:
-    """Replace the store atomically; a reader never observes a truncated file."""
+    """Replace atomically; concurrent callers must hold `_locked_for_dismiss`."""
     path = str(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     payload = json.dumps({"dismissed": sorted(set(ids))}, indent=1)
@@ -227,7 +237,7 @@ def dismiss(path, qid: str) -> set[str]:
     can never both start from the same snapshot and clobber each other.
     """
     with _locked_for_dismiss(path):
-        ids = load_dismissed(path)
+        ids = _load_dismissed_unlocked(path)
         ids.add(str(qid))
         save_dismissed(path, ids)
         return ids

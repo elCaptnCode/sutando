@@ -346,6 +346,70 @@ class Dismissal(unittest.TestCase):
         )
         self.assertEqual([], list(self.dir.glob("state/*.tmp")), "temp file left behind")
 
+    def test_posix_reader_does_not_acquire_writer_lock(self):
+        triage.dismiss(self.store, "seed")
+        fake_os = mock.Mock(wraps=triage.os)
+        fake_os.name = "posix"
+        with mock.patch.object(triage, "os", fake_os), \
+                mock.patch.object(triage, "_locked_for_dismiss", side_effect=AssertionError("unexpected lock")):
+            self.assertEqual(triage.load_dismissed(self.store), {"seed"})
+
+    def test_windows_unreadable_sidecar_preserves_empty_fallback(self):
+        fake_os = mock.Mock(wraps=triage.os)
+        fake_os.name = "nt"
+        with mock.patch.object(triage, "os", fake_os), \
+                mock.patch.object(triage, "_locked_for_dismiss", side_effect=PermissionError("denied")):
+            self.assertEqual(triage.load_dismissed(self.store), set())
+
+    def test_windows_reader_waits_for_writer_and_observes_committed_snapshot(self):
+        triage.dismiss(self.store, "seed")
+        writing = threading.Event()
+        release = threading.Event()
+        reading = threading.Event()
+        read_done = threading.Event()
+        observed = []
+        failures = []
+        original_save = triage.save_dismissed
+        fake_os = mock.Mock(wraps=triage.os)
+        fake_os.name = "nt"
+
+        def paused_save(path, ids):
+            writing.set()
+            if not release.wait(5):
+                raise TimeoutError("test writer was not released")
+            original_save(path, ids)
+
+        def writer():
+            try:
+                triage.dismiss(self.store, "new")
+            except BaseException as exc:
+                failures.append(exc)
+
+        def reader():
+            reading.set()
+            observed.append(triage.load_dismissed(self.store))
+            read_done.set()
+
+        with mock.patch.object(triage, "os", fake_os), \
+                mock.patch.object(triage, "save_dismissed", side_effect=paused_save):
+            w = threading.Thread(target=writer, daemon=True)
+            r = threading.Thread(target=reader, daemon=True)
+            w.start()
+            try:
+                self.assertTrue(writing.wait(3))
+                r.start()
+                self.assertTrue(reading.wait(3))
+                self.assertFalse(read_done.wait(0.1), "reader bypassed the writer lock")
+            finally:
+                release.set()
+                w.join(5)
+                if r.ident is not None:
+                    r.join(5)
+            self.assertFalse(w.is_alive(), "dismiss nested a non-reentrant lock")
+            self.assertFalse(r.is_alive(), "reader did not acquire released lock")
+        self.assertEqual(failures, [])
+        self.assertEqual(observed, [{"seed", "new"}])
+
     def test_two_concurrent_dismissals_do_not_clobber_each_other(self):
         """Reviewer-caught race: two callers both read {seed} before either writes,
         so a plain read-modify-write drops whichever writer finishes first. The
@@ -591,7 +655,7 @@ triage.dismiss(Path(sys.argv[2]), 'child')
                     self.assertTrue(ready.exists(), 'child did not start')
                     time.sleep(0.2)
                     self.assertIsNone(child.poll(), 'dismiss did not wait for the sidecar lock')
-                    self.assertEqual(triage.load_dismissed(store), {'seed'})
+                    self.assertEqual(json.loads(store.read_text())['dismissed'], ['seed'])
                 except BaseException:
                     child.terminate()
                     child.communicate(timeout=10)
