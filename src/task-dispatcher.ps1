@@ -346,14 +346,42 @@ function Publish-TaskResult($taskId, $result) {
     }
 }
 
+# Defender, the search indexer and sync clients briefly hold new files open on Windows.
+$script:ARCHIVE_ATTEMPTS = 20
+$script:ARCHIVE_RETRY_MS = 100
+
+# Never throws. An unarchived claim stays `.processing`; startup archives such claims, never runs them.
+function Complete-TaskClaim($claimedPath, $taskId) {
+    $archived = Join-Path $ARCHIVE "$taskId.txt"
+    for ($attempt = 1; $attempt -le $script:ARCHIVE_ATTEMPTS; $attempt++) {
+        try {
+            Move-Item -LiteralPath $claimedPath -Destination $archived -Force -ErrorAction Stop
+            return $true
+        } catch {
+            if ($attempt -eq $script:ARCHIVE_ATTEMPTS) {
+                Log "${taskId}: archive failed after $attempt attempts; claim left in place and the task will not run again ($_)"
+                return $false
+            }
+            Start-Sleep -Milliseconds $script:ARCHIVE_RETRY_MS
+        }
+    }
+}
+
 function Resolve-InterruptedTask($claimedPath, $taskId) {
     # A crashed worker may already have performed actions, so never replay its claim.
     $resultFile = Join-Path $RESULTS "$taskId.txt"
-    if (-not (Test-Path -LiteralPath $resultFile)) {
-        Publish-TaskResult $taskId 'This task was interrupted. Its actions may have completed or may still be running; check the outcome before submitting it again.'
+    try {
+        if (-not (Test-Path -LiteralPath $resultFile)) {
+            Publish-TaskResult $taskId 'This task was interrupted. Its actions may have completed or may still be running; check the outcome before submitting it again.'
+        }
+    } catch {
+        # Keeping the claim lets the next startup sweep publish the notice.
+        Log "${taskId}: could not publish interrupted notice; claim kept for the next startup ($_)"
+        return
     }
-    Move-Item -LiteralPath $claimedPath -Destination (Join-Path $ARCHIVE "$taskId.txt") -Force -ErrorAction Stop
-    Log "${taskId}: archived interrupted claim without retrying"
+    if (Complete-TaskClaim $claimedPath $taskId) {
+        Log "${taskId}: archived interrupted claim without retrying"
+    }
 }
 
 function Get-VerifiedDiscordCollaborator($claimedPath) {
@@ -393,8 +421,7 @@ function Process-Task($claimedPath, $taskId) {
         $result = Invoke-CodexSandbox $prompt $systemInstructions $taskId $tier "$claimedPath.stderr"
         $resultFile = Join-Path $RESULTS "$taskId.txt"
         Publish-TaskResult $taskId $result
-        $archived = Join-Path $ARCHIVE "$taskId.txt"
-        Move-Item -LiteralPath $claimedPath -Destination $archived -Force -ErrorAction Stop
+        $null = Complete-TaskClaim $claimedPath $taskId
         return
     }
 
@@ -537,8 +564,7 @@ $prompt
     Log "${taskId}: done -> $resultFile"
 
     # Archive the task file so we don't reprocess it on rescan.
-    $archived = Join-Path $ARCHIVE "$taskId.txt"
-    Move-Item -LiteralPath $claimedPath -Destination $archived -Force -ErrorAction Stop
+    $null = Complete-TaskClaim $claimedPath $taskId
 }
 
 # --- Watch loop --------------------------------------------------------------
@@ -559,16 +585,23 @@ function Drain-Pending {
             Process-Task $claimed $taskId
         } catch {
             Log "${taskId}: uncaught exception: $_"
-            if (Test-Path -LiteralPath $claimed) {
-                Resolve-InterruptedTask $claimed $taskId
+            try {
+                if (Test-Path -LiteralPath $claimed) { Resolve-InterruptedTask $claimed $taskId }
+            } catch {
+                Log "${taskId}: recovery failed; claim kept and the task will not run again ($_)"
             }
         }
     }
 }
 
 try {
-    Get-ChildItem -Path $TASKS -File -Filter 'task-*.txt.processing' | ForEach-Object {
-        Resolve-InterruptedTask $_.FullName ($_.Name -replace '\.txt\.processing$', '')
+    Get-ChildItem -Path $TASKS -File -Filter 'task-*.txt.processing' -ErrorAction SilentlyContinue | ForEach-Object {
+        $staleId = $_.Name -replace '\.txt\.processing$', ''
+        try {
+            Resolve-InterruptedTask $_.FullName $staleId
+        } catch {
+            Log "${staleId}: startup recovery failed; claim kept ($_)"
+        }
     }
     Drain-Pending
     while ($true) {
