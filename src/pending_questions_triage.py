@@ -12,7 +12,6 @@ behind it.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -20,6 +19,8 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Iterable, Optional
+
+from file_lock import locked_file
 
 # A reference carrying its own repository: `owner/repo#123`, or a github.com pull/
 # issue URL. These are the only ones whose repository is known from the text alone.
@@ -165,7 +166,7 @@ def rank(rows: list[dict]) -> list[dict]:
 # Permanent by design: a changed situation is written as a NEW section, which
 # hashes to a new id. So this stores ids, never "until" state.
 
-# Paired with the flock below, matching triage_actions.py's _locked_for_append.
+# Serialize threads as well as processes during dismissal transactions.
 _dismiss_write_lock = threading.Lock()
 
 
@@ -183,12 +184,8 @@ def _locked_for_dismiss(path):
     path = Path(path) if not isinstance(path, Path) else path
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(f"{path.suffix}.lock")
-    with _dismiss_write_lock, lock_path.open("a+") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    with _dismiss_write_lock, locked_file(lock_path):
+        yield
 
 
 def load_dismissed(path) -> set[str]:

@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -499,6 +500,68 @@ class AdapterRows(unittest.TestCase):
             payload = api._questions_queue_payload()
         self.assertEqual(3, len(payload["questions"]))
         self.assertIn("age_days", payload["questions"][0])
+
+
+class PortableDismissal(unittest.TestCase):
+    def test_runtime_import_does_not_require_fcntl(self):
+        code = r"""
+import importlib.abc
+import importlib.util
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import file_lock
+class NoFcntl(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'fcntl':
+            raise ModuleNotFoundError('fcntl is unavailable on Windows')
+sys.modules.pop('fcntl', None)
+sys.meta_path.insert(0, NoFcntl())
+spec = importlib.util.spec_from_file_location('agent_api_portable', Path(sys.argv[1]) / 'agent-api.py')
+api = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(api)
+import pending_questions_triage
+pending_questions_triage.dismiss(Path(sys.argv[2]), 'portable')
+assert pending_questions_triage.load_dismissed(Path(sys.argv[2])) == {'portable'}
+"""
+        with tempfile.TemporaryDirectory() as td:
+            result = subprocess.run([sys.executable, '-c', code, str(REPO / 'src'),
+                                     str(Path(td) / 'dismissed.json')],
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_dismiss_waits_for_shared_sidecar_lock_and_preserves_existing_ids(self):
+        from file_lock import locked_file
+        code = r"""
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import pending_questions_triage as triage
+Path(sys.argv[3]).write_text('ready')
+triage.dismiss(Path(sys.argv[2]), 'child')
+"""
+        with tempfile.TemporaryDirectory() as td:
+            store = Path(td) / 'dismissed.json'
+            ready = Path(td) / 'ready'
+            triage.dismiss(store, 'seed')
+            with locked_file(store.with_suffix('.json.lock')):
+                child = subprocess.Popen([sys.executable, '-c', code, str(REPO / 'src'), str(store), str(ready)],
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    deadline = time.monotonic() + 10
+                    while not ready.exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(ready.exists(), 'child did not start')
+                    time.sleep(0.2)
+                    self.assertIsNone(child.poll(), 'dismiss did not wait for the sidecar lock')
+                    self.assertEqual(triage.load_dismissed(store), {'seed'})
+                except BaseException:
+                    child.terminate()
+                    child.communicate(timeout=10)
+                    raise
+            _, stderr = child.communicate(timeout=10)
+            self.assertEqual(child.returncode, 0, stderr)
+            self.assertEqual(triage.load_dismissed(store), {'seed', 'child'})
 
 
 if __name__ == "__main__":

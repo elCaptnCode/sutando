@@ -170,6 +170,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { $failures += 'find-pids.test.py failed' }
           python tests/health-check-skill-junctions.test.py
           if ($LASTEXITCODE -ne 0) { $failures += 'health-check-skill-junctions.test.py failed' }
+          python tests/pending-questions-triage.test.py
+          if ($LASTEXITCODE -ne 0) { $failures += 'pending-questions-triage.test.py failed' }
           python tests/http-process-probes.test.py
           if ($LASTEXITCODE -ne 0) { $failures += 'http-process-probes.test.py failed' }
           python tests/health-check-secret-scanner-live-interpreter.test.py

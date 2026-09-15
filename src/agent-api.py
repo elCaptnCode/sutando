@@ -584,7 +584,7 @@ def dismiss_question(qid: str) -> tuple:
     return 200, {"ok": True, "id": qid}
 
 
-def _active_tasks_payload(watcher_ok: bool | None, core_ok: bool) -> dict:
+def _active_tasks_payload(watcher_ok: Optional[bool], core_ok: bool) -> dict:
     """Build the stable response payload for GET /tasks/active."""
     return {
         "tasks": _active_task_rows(),
