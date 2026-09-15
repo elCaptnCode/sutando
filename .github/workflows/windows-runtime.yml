@@ -161,130 +161,132 @@ jobs:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: '1'
         run: |
+          $failures = @()
           python tests/notify-ps1-dm-delegation.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'notify-ps1-dm-delegation.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'notify-ps1-dm-delegation.test.py failed' }
           python tests/image-resize.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'image-resize.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'image-resize.test.py failed' }
           python tests/find-pids.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'find-pids.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'find-pids.test.py failed' }
           python tests/health-check-skill-junctions.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-skill-junctions.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-skill-junctions.test.py failed' }
           python tests/http-process-probes.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'http-process-probes.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'http-process-probes.test.py failed' }
           python tests/health-check-secret-scanner-live-interpreter.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-secret-scanner-live-interpreter.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-secret-scanner-live-interpreter.test.py failed' }
           python tests/cwd-lint.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'cwd-lint.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'cwd-lint.test.py failed' }
           python tests/task-id-delegation.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'task-id-delegation.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'task-id-delegation.test.py failed' }
           python tests/task-archive.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'task-archive.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'task-archive.test.py failed' }
           python tests/local-task-protocol-atomic-write.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'local-task-protocol-atomic-write.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'local-task-protocol-atomic-write.test.py failed' }
           python tests/git-binary-resolution.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'git-binary-resolution.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'git-binary-resolution.test.py failed' }
           python tests/health-check-live-tree-drift.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-live-tree-drift.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-live-tree-drift.test.py failed' }
           python tests/health-check-held-no-consumer.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-held-no-consumer.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-held-no-consumer.test.py failed' }
           python tests/health-check-punctuality-completed-unpublished.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-punctuality-completed-unpublished.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-punctuality-completed-unpublished.test.py failed' }
           python tests/health-check-context-read-budget.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-context-read-budget.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-context-read-budget.test.py failed' }
           python tests/health-check-gateway-stale-lane.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-gateway-stale-lane.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-gateway-stale-lane.test.py failed' }
           python tests/health-check-stale-proactive-backlog.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-stale-proactive-backlog.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-stale-proactive-backlog.test.py failed' }
           python tests/health-check-memory-dir-override.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'health-check-memory-dir-override.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'health-check-memory-dir-override.test.py failed' }
           python tests/core-heartbeat.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'core-heartbeat.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'core-heartbeat.test.py failed' }
           python tests/cli-wedge.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'cli-wedge.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'cli-wedge.test.py failed' }
           python tests/cli-wedge-health-probe.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'cli-wedge-health-probe.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'cli-wedge-health-probe.test.py failed' }
           python tests/single-instance.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'single-instance.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'single-instance.test.py failed' }
           python tests/file-lock.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'file-lock.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'file-lock.test.py failed' }
           python tests/outbox-windows.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'outbox-windows.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'outbox-windows.test.py failed' }
           python tests/proactive-recovery-process-probe.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'proactive-recovery-process-probe.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'proactive-recovery-process-probe.test.py failed' }
           python tests/gateway-proactive-explicit-room-without-default.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'gateway-proactive-explicit-room-without-default.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'gateway-proactive-explicit-room-without-default.test.py failed' }
           python tests/gateway-destined-proactive-not-claimed.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'gateway-destined-proactive-not-claimed.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'gateway-destined-proactive-not-claimed.test.py failed' }
           python src/remote-gateway-bridge.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'remote-gateway-bridge.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'remote-gateway-bridge.test.py failed' }
           python tests/sparrow-outbox-claim-protocol.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'sparrow-outbox-claim-protocol.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'sparrow-outbox-claim-protocol.test.py failed' }
           python tests/outbox-race.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'outbox-race.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'outbox-race.test.py failed' }
           python tests/process-pins.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'process-pins.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'process-pins.test.py failed' }
           python tests/process-pins-reader-rejects-what-writer-rejects.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'process-pins-reader-rejects-what-writer-rejects.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'process-pins-reader-rejects-what-writer-rejects.test.py failed' }
           python tests/process-pins-writer-atomicity.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'process-pins-writer-atomicity.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'process-pins-writer-atomicity.test.py failed' }
           python tests/hitl-manager-identity.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'hitl-manager-identity.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'hitl-manager-identity.test.py failed' }
           python tests/hitl-schema.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'hitl-schema.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'hitl-schema.test.py failed' }
           python tests/comment-signature-guard.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'comment-signature-guard.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'comment-signature-guard.test.py failed' }
           python tests/notify-reviewers-body-file.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'notify-reviewers-body-file.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'notify-reviewers-body-file.test.py failed' }
           python tests/body-file-read.test.py ReaderContract
-          if ($LASTEXITCODE -ne 0) { throw 'body-file-read.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'body-file-read.test.py failed' }
           python tests/anchored-edit.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'anchored-edit.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'anchored-edit.test.py failed' }
           python tests/shutdown-sentinel.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'shutdown-sentinel.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'shutdown-sentinel.test.py failed' }
           python tests/cron-state-lock-windows.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'cron-state-lock-windows.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'cron-state-lock-windows.test.py failed' }
           python tests/idle-surface-canonical-hash.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'idle-surface-canonical-hash.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'idle-surface-canonical-hash.test.py failed' }
           python tests/proactive-loop-idle-surface-hash.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'proactive-loop-idle-surface-hash.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'proactive-loop-idle-surface-hash.test.py failed' }
           python tests/delivery-primitives-single-owner.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'delivery-primitives-single-owner.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'delivery-primitives-single-owner.test.py failed' }
           python tests/access-store-concurrency.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'access-store-concurrency.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'access-store-concurrency.test.py failed' }
           python tests/agent-activity.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'agent-activity.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'agent-activity.test.py failed' }
           python tests/activity-bus.test.py Acceptance StateMachine Visibility Wiring
-          if ($LASTEXITCODE -ne 0) { throw 'activity-bus.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'activity-bus.test.py failed' }
           python tests/agent-availability.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'agent-availability.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'agent-availability.test.py failed' }
           python tests/core-input-watch-chat-escalation.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'core-input-watch-chat-escalation.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'core-input-watch-chat-escalation.test.py failed' }
           python tests/current-track-rotate.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'current-track-rotate.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'current-track-rotate.test.py failed' }
           python tests/workspace-lock.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'workspace-lock.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'workspace-lock.test.py failed' }
           python tests/runtime-api-dispatcher.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'runtime-api-dispatcher.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'runtime-api-dispatcher.test.py failed' }
           python tests/runtime-api-human-action.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'runtime-api-human-action.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'runtime-api-human-action.test.py failed' }
           python tests/runtime-api-tasks-view.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'runtime-api-tasks-view.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'runtime-api-tasks-view.test.py failed' }
           python tests/runtime-api-identity-view.test.py TestAuthorityBoundaries
-          if ($LASTEXITCODE -ne 0) { throw 'runtime-api-identity-view.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'runtime-api-identity-view.test.py failed' }
           python tests/task-workstreams.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'task-workstreams.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'task-workstreams.test.py failed' }
           python tests/report-feedback.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'report-feedback.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'report-feedback.test.py failed' }
           python tests/signal-room-tasks.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'signal-room-tasks.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'signal-room-tasks.test.py failed' }
           python tests/voice-lock-windows.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'voice-lock-windows.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'voice-lock-windows.test.py failed' }
           python tests/quota-projection.test.py RecordSample.test_cross_process_acks_all_survive RecordSample.test_concurrent_writers_lose_no_acknowledged_sample
-          if ($LASTEXITCODE -ne 0) { throw 'quota-projection.test.py failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'quota-projection.test.py failed' }
           python -c "import sys; sys.path.insert(0, 'src'); import quota_projection"
-          if ($LASTEXITCODE -ne 0) { throw 'quota_projection Windows import failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'quota_projection Windows import failed' }
           python -c "import sys; sys.path.insert(0, 'src'); import task_workstreams"
-          if ($LASTEXITCODE -ne 0) { throw 'task_workstreams Windows import failed' }
+          if ($LASTEXITCODE -ne 0) { $failures += 'task_workstreams Windows import failed' }
+          if ($failures.Count) { throw ($failures -join "; ") }
 
       - name: Run Windows TypeScript integrations
         shell: pwsh

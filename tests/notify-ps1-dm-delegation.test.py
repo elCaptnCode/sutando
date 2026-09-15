@@ -32,7 +32,7 @@ class NotifyDelegation(unittest.TestCase):
                 "function Resolve-SutandoWorkspace { return $env:TEST_REPO }\n")
             (src / "dm-result.py").write_text(
                 "import os, pathlib\ndef send_dm(text):\n"
-                "    pathlib.Path(os.environ['TEST_REPO'], 'sent.txt').write_text(text, encoding='utf-8')\n"
+                "    pathlib.Path(os.environ['TEST_REPO'], 'sent.txt').write_bytes(text.encode('utf-8'))\n"
                 "    return False\n")
             wrapper = repo / "run.ps1"
             wrapper.write_text('''
