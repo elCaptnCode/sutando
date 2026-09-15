@@ -25,6 +25,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $REPO = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'native-arguments.ps1')
 
 # Same pattern startup.sh / health-check.py use to identify the core process.
 function Get-CorePids {
@@ -114,18 +115,18 @@ $launcherDir = Join-Path $env:TEMP 'sutando-launcher'
 New-Item -ItemType Directory -Force -Path $launcherDir | Out-Null
 $launcher = Join-Path $launcherDir "core-$([Diagnostics.Process]::GetCurrentProcess().Id).ps1"
 
-# PowerShell's & call operator handles spaces in $claudePath natively when the
-# path is a variable, no quoting required. Same for each $claudeArgs element.
+# Values land inside single-quoted literals, so a path like C:\Users\O'Brien must double its quote.
+function ConvertTo-SingleQuotedLiteral([string]$value) { "'" + ($value -replace "'", "''") + "'" }
 $launcherBody = @"
 `$ErrorActionPreference = 'Continue'
-Set-Location '$REPO'
+Set-Location -LiteralPath $(ConvertTo-SingleQuotedLiteral $REPO)
 Write-Host 'Launching sutando-core...' -ForegroundColor Cyan
-Write-Host '  claude: $($claudeCmd.Source)'
-Write-Host '  args  : $($claudeArgs -join ' ')'
+Write-Host $(ConvertTo-SingleQuotedLiteral "  claude: $($claudeCmd.Source)")
+Write-Host $(ConvertTo-SingleQuotedLiteral "  args  : $($claudeArgs -join ' ')")
 Write-Host ''
-`$claudePath = '$($claudeCmd.Source)'
+`$claudePath = $(ConvertTo-SingleQuotedLiteral $claudeCmd.Source)
 `$claudeArgs = @(
-$(($claudeArgs | ForEach-Object { "    '" + ($_ -replace "'", "''") + "'" }) -join ",`n")
+$(($claudeArgs | ForEach-Object { '    ' + (ConvertTo-SingleQuotedLiteral $_) }) -join ",`n")
 )
 & `$claudePath @claudeArgs
 `$ec = `$LASTEXITCODE
@@ -140,15 +141,15 @@ if ($wt) {
     # wt.exe argv-parses everything after `new-tab` until `;` as the command
     # for that tab. -- in PowerShell stops -File/-Command argument capture so
     # the launcher path lands as wt's command-to-run.
-    Start-Process -FilePath $wt.Source -ArgumentList @(
+    Start-Process -FilePath $wt.Source -ArgumentList (ConvertTo-NativeArgumentString @(
         'new-tab', '--title', 'sutando-core', '--',
         $psExe.Source, '-NoExit', '-NoProfile', '-File', $launcher
-    )
+    ))
 } else {
     Write-Host "Launching sutando-core in a new PowerShell window..."
-    Start-Process -FilePath $psExe.Source -ArgumentList @(
+    Start-Process -FilePath $psExe.Source -ArgumentList (ConvertTo-NativeArgumentString @(
         '-NoExit', '-NoProfile', '-File', $launcher
-    )
+    ))
 }
 
 Start-Sleep -Seconds 2

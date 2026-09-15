@@ -6,7 +6,8 @@ $errors = $null
 $tree = [System.Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $repo 'src/startup.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Startup has PowerShell parse errors.' }
-foreach ($name in 'ConvertTo-NativeArgumentString', 'Start-Service-Bg', 'Install-WindowsDependencies') {
+. (Join-Path $repo 'scripts/native-arguments.ps1')
+foreach ($name in 'Start-Service-Bg', 'Install-WindowsDependencies') {
     $definition = $tree.Find({ param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $false)
@@ -62,6 +63,74 @@ try {
         }
     }
 
+    function Assert-NativeRoundTrip($argumentString, $expected, $label) {
+        $out = Join-Path $temp "$label.json"
+        $argv = (ConvertTo-NativeArgumentString @($capture)) + ' ' + $argumentString
+        $process = Microsoft.PowerShell.Management\Start-Process -FilePath $node -ArgumentList $argv `
+            -RedirectStandardOutput $out -RedirectStandardError "$out.err" -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "$label child failed: $(Get-Content "$out.err" -Raw)" }
+        Assert-Arguments "$label.json" $expected
+    }
+
+    $previousTemp = $env:TEMP
+    $env:TEMP = Join-Path $temp "user O'Brien temp"
+    try {
+        & {
+            $claudePath = Join-Path $temp "Claude O'Brien\claude.exe"
+            $pwshPath = Join-Path $temp 'Program Files\PowerShell\7\pwsh.exe'
+            $wtPath = Join-Path $temp 'Windows Apps\wt.exe'
+            $launched = [Collections.Generic.List[object]]::new()
+            function Get-CimInstance { [CmdletBinding()] param([Parameter(Position = 0)]$ClassName) }
+            function Start-Sleep { param($Seconds) }
+            function Get-Command {
+                [CmdletBinding()] param([Parameter(Position = 0)]$Name, [switch]$All)
+                $source = switch ($Name) {
+                    'claude' { $claudePath }
+                    'pwsh' { $pwshPath }
+                    'wt' { if ($useWt) { $wtPath } }
+                }
+                if ($source) { [pscustomobject]@{ Source = $source; Path = $source } }
+            }
+            function Start-Process {
+                param($FilePath, $ArgumentList)
+                # Start-Process joins array elements with bare spaces.
+                $launched.Add([pscustomobject]@{ FilePath = $FilePath; ArgumentList = (@($ArgumentList) -join ' ') })
+            }
+            foreach ($useWt in $false, $true) {
+                $launched.Clear()
+                & (Join-Path $repo 'scripts/start-cli.ps1') | Out-Null
+                $launcher = Join-Path $env:TEMP "sutando-launcher\core-$PID.ps1"
+                $expected = @('-NoExit', '-NoProfile', '-File', $launcher)
+                $wantedFile = $pwshPath
+                if ($useWt) {
+                    $expected = @('new-tab', '--title', 'sutando-core', '--', $pwshPath) + $expected
+                    $wantedFile = $wtPath
+                }
+                if ($launched.Count -ne 1 -or $launched[0].FilePath -ne $wantedFile) {
+                    throw "start-cli launch shape changed (wt=$useWt): $($launched | ConvertTo-Json -Compress)"
+                }
+                Assert-NativeRoundTrip $launched[0].ArgumentList $expected "start-cli-wt-$useWt"
+
+                $launcherErrors = $null
+                $launcherTree = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $launcher, [ref]$null, [ref]$launcherErrors)
+                if ($launcherErrors.Count) { throw "start-cli launcher has parse errors: $launcherErrors" }
+                $assigned = @{}
+                $launcherTree.FindAll({ param($node)
+                    $node -is [System.Management.Automation.Language.AssignmentStatementAst]
+                }, $false) | ForEach-Object {
+                    $assigned[$_.Left.VariablePath.UserPath] = & ([scriptblock]::Create($_.Right.Extent.Text))
+                }
+                if ($assigned.claudePath -cne $claudePath -or $assigned.claudeArgs[-1] -cne '/proactive-loop' -or
+                    $assigned.claudeArgs -notcontains $HOME) {
+                    throw "start-cli launcher lost its claude invocation: $($assigned | ConvertTo-Json -Compress)"
+                }
+            }
+        }
+    } finally {
+        $env:TEMP = $previousTemp
+    }
+
     & {
         function Test-Path {
             param($Path)
@@ -89,7 +158,7 @@ try {
             }
         }
     }
-    Write-Output 'Windows startup: native argv round trips and 5 installation cases passed.'
+    Write-Output 'Windows startup: native argv round trips, 2 start-cli launches and 5 installation cases passed.'
 } finally {
     Remove-Item -Recurse -Force $temp
 }

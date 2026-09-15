@@ -65,9 +65,10 @@ if ($Background) {
     # launcher exits, so restart appears hung while services are already live.
     $stdoutLog = Join-Path $LOGS 'task-dispatcher.stdout.log'
     $stderrLog = Join-Path $LOGS 'task-dispatcher.stderr.log'
-    Start-Process -FilePath $psExe.Source -ArgumentList @(
-        '-NoProfile', '-File', ('"' + $PSCommandPath + '"')
-    ) -WindowStyle Hidden `
+    . (Join-Path $REPO 'scripts/native-arguments.ps1')
+    Start-Process -FilePath $psExe.Source -ArgumentList (ConvertTo-NativeArgumentString @(
+        '-NoProfile', '-File', $PSCommandPath
+    )) -WindowStyle Hidden `
       -RedirectStandardOutput $stdoutLog `
       -RedirectStandardError $stderrLog | Out-Null
     Write-Host "task-dispatcher launched in background. Log: $LOGFILE"
