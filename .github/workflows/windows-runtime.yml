@@ -121,6 +121,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'windows-workspace-encoding.test.ps1 failed' }
           pwsh -NoProfile -File tests/windows-startup.test.ps1
           if ($LASTEXITCODE -ne 0) { throw 'windows-startup.test.ps1 failed' }
+          pwsh -NoProfile -File tests/windows-restart.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'windows-restart.test.ps1 failed' }
           .\node_modules\.bin\tsx.cmd --test --test-force-exit tests/platform-windows-io.test.ts
           if ($LASTEXITCODE -ne 0) { throw 'platform-windows-io.test.ts failed' }
 
