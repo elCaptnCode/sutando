@@ -114,13 +114,13 @@ export const switchVoiceConfigTool: ToolDefinition = {
 		'"search" = gemini-2.5-flash-native-audio + googleSearch:true (best for Q&A with Web grounding); ' +
 		'"no-search" = gemini-3.1-flash-live-preview + googleSearch:false (legacy 3.1 mode); ' +
 		'"gemini-3.8" = gemini-3.8-live + googleSearch:false (default low-latency mode); ' +
-		'"latest-search" = gemini-3.8-live + googleSearch:true (newest model with Web grounding). ' +
+		'"latest-search" = gemini-3.8-live + googleSearch:true (newest model with Web grounding; availability depends on the Gemini project/account quota). ' +
 		'Restart takes ~2-3 seconds during which voice will be silent; the web client auto-reconnects. ' +
 		'HIGH-IMPACT: this restarts the whole voice session. Call it ONLY on one of those explicit switch ' +
 		'requests — NEVER because the conversation merely mentions search/searching, and never on filler ' +
 		'or garbled speech; when unsure, fire nothing.',
 	parameters: z.object({
-		preset: z.enum(['search', 'no-search', 'gemini-3.8', 'latest-search']).describe('Which preset to switch to. "search" = 2.5+Web grounding. "no-search" = legacy 3.1 without Web. "gemini-3.8" = 3.8 without Web. "latest-search" = 3.8 with Web grounding.'),
+	preset: z.enum(['search', 'no-search', 'gemini-3.8', 'latest-search']).describe('Which preset to switch to. "search" = 2.5+Web grounding. "no-search" = legacy 3.1 without Web. "gemini-3.8" = 3.8 without Web. "latest-search" = 3.8 with Web grounding; availability depends on Gemini project/account quota.'),
 	}),
 	execution: 'inline',
 	async execute(args) {
