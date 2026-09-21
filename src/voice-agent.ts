@@ -305,7 +305,8 @@ const VOICE_MODEL = process.env.VOICE_MODEL || 'gemini-2.5-flash';
 // tool) have a file to edit. If the copy fails (or the template is gone),
 // loadVoiceConfig falls back to its built-in defaults. Schema + defaults: see
 // src/voice-config.ts. voice-agent ships with Gemini 3.8 Live and
-// googleSearch=false for low-latency voice conversations. Phone inherits the
+// googleSearch=false for low-latency voice conversations; this PR does not
+// claim a new code-heavy workload benchmark. Phone inherits the
 // package default (2.5+search) unless its own config overrides it.
 import { loadVoiceConfig, resolveSessionTuning } from './voice-config.js';
 const _voiceAgentDir = dirname(fileURLToPath(import.meta.url));
