@@ -227,6 +227,8 @@ HANDLER_STATE_READY=""
 WATCH_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sutando-task-watch.XXXXXX")"
 mkfifo "$WATCH_RUNTIME_DIR/events"
 FSWATCH_PID=""
+CATCHUP_SEEN_DIR="$WATCH_RUNTIME_DIR/catchup-seen"
+mkdir -p "$CATCHUP_SEEN_DIR"
 CLEANING_UP=0
 CLAIMS_DIR="$WORKSPACE_DIR/state/task-event-handler-claims"
 # Per instance: this receipt says "MY optional handler declined this task", and
@@ -870,17 +872,45 @@ trap 'cleanup; exit 0' HUP INT TERM
 # restart gap, in priority order. Install cleanup first so an immediately
 # exiting fswatch cannot kill a just-started provider before its durable
 # fallback receipt is emitted.
-startup_sweep() {
-  local fn
+task_fingerprint() {
+  local path="$1" mtime size
+  case "$(uname -s)" in
+    Darwin) mtime="$(stat -f '%m' "$path" 2>/dev/null)" ;;
+    *) mtime="$(stat -c '%Y' "$path" 2>/dev/null)" ;;
+  esac
+  size="$(wc -c < "$path" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$mtime" ] && [ -n "$size" ] || return 1
+  printf '%s:%s\n' "$mtime" "$size"
+}
+
+catchup_sweep() {
+  local fn path fingerprint seen
   while IFS= read -r fn; do
-    dispatch_task "$TASKS_DIR/$fn"
+    path="$TASKS_DIR/$fn"
+    [ -f "$path" ] || continue
+    fingerprint="$(task_fingerprint "$path")" || continue
+    seen="$CATCHUP_SEEN_DIR/$fn"
+    if [ -f "$seen" ] && [ "$(cat "$seen" 2>/dev/null)" = "$fingerprint" ]; then
+      continue
+    fi
+    dispatch_task "$path"
+    printf '%s\n' "$fingerprint" > "$seen"
   done < <(priority_sorted_tasks)
+}
+
+startup_sweep() {
+  catchup_sweep
 }
 # A session watcher sweeps only once the standby has stopped (below); any other
 # role has no peer on its inbox and sweeps before it subscribes, as always.
 if [ "$WATCHER_ROLE" != "session" ]; then
   startup_sweep
 fi
+
+CATCHUP_INTERVAL="${SUTANDO_WATCHER_CATCHUP_SECONDS:-${SUTANDO_HANDLER_POLL_INTERVAL:-30}}"
+case "$CATCHUP_INTERVAL" in
+  ''|*[!0-9]*|0) CATCHUP_INTERVAL=30 ;;
+esac
 
 # Stream subsequent events. -l 0.5 = 500ms latency batch (fswatch coalesces
 # burst events). --event Created --event Renamed catches new file
@@ -914,13 +944,16 @@ if [ -n "$HANDLER_CONFIG_DIR" ]; then
   mkdir -p "$HANDLER_CONFIG_DIR"
   fswatch_paths+=("$HANDLER_CONFIG_DIR")
 fi
-fswatch \
-  -l 0.5 \
-  --event Created \
-  --event Renamed \
-  --event Updated \
-  "${fswatch_paths[@]}" > "$WATCH_RUNTIME_DIR/events" 2>/dev/null &
-FSWATCH_PID=$!
+start_fswatch() {
+  fswatch \
+    -l 0.5 \
+    --event Created \
+    --event Renamed \
+    --event Updated \
+    "${fswatch_paths[@]}" > "$WATCH_RUNTIME_DIR/events" 2>/dev/null &
+  FSWATCH_PID=$!
+}
+start_fswatch
 # The writer end opens only once a reader exists, so fswatch execs here, not at
 # the launch above; fd 3 stays open so the loop's own open can never be the last reader.
 exec 3< "$WATCH_RUNTIME_DIR/events"
@@ -1034,6 +1067,7 @@ while true; do
     # macOS's /bin/bash (3.2) returns 1 for both a read TIMEOUT and EOF, so the
     # exit code alone can't distinguish them -- ask whether fswatch is still
     # alive (same pattern as src/agent/codex/cli/task-notifier.sh).
+    catchup_sweep
     if kill -0 "$FSWATCH_PID" 2>/dev/null; then
       if [ -n "$HANDLER_CONFIG_PATH" ]; then
         reload_current_handler
@@ -1042,9 +1076,10 @@ while true; do
       fi
       continue
     fi
-    # fswatch died and closed its end of the pipe: genuine EOF. Fall through
-    # to the script's normal exit path rather than spinning on a dead FIFO.
-    break
+    # fswatch died and closed its end of the pipe: re-arm it before the next
+    # bounded catch-up pass rather than leaving the inbox permanently dark.
+    start_fswatch
+    sleep 1
   fi
   handle_event "$path"
   retry_held_tasks_if_due
