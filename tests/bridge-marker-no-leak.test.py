@@ -243,7 +243,13 @@ def main() -> int:
     conforming = {
         name
         for name, path in consumers.items()
-        if path.is_file() and "from result_markers import parse_markers" in path.read_text(encoding="utf-8")
+        if path.is_file() and any(
+            needle in path.read_text(encoding="utf-8")
+            for needle in (
+                "from result_markers import parse_markers",
+                "from .result_markers import parse_markers",
+            )
+        )
     }
 
     doc_path = REPO / "docs" / "architecture-boundaries.md"
