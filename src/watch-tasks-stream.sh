@@ -1076,6 +1076,13 @@ while true; do
       fi
       continue
     fi
+    # A session watcher is supervised by the hosting process.  Let it exit so
+    # that supervisor can re-arm the standby; keeping this process alive would
+    # defeat the session handoff contract.  Ordinary watchers own their own
+    # coverage and can re-arm fswatch locally.
+    if [ "$WATCHER_ROLE" = "session" ]; then
+      break
+    fi
     # fswatch died and closed its end of the pipe: re-arm it before the next
     # bounded catch-up pass rather than leaving the inbox permanently dark.
     start_fswatch
