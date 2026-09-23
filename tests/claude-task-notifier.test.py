@@ -373,6 +373,15 @@ esac
             timeout=timeout,
         )
 
+    def expected_prompt(self, name):
+        """The line the notifier types for `name`. ONE definition, pinned to the
+        producer by test_the_prompt_names_the_standby_and_the_rearm_command."""
+        return (f"Sutando task ready: {name}. Read {self.tasks_dir}/{name}, follow CLAUDE.md, "
+                f"complete the task, and write the result to {self.results_dir}/{name}. "
+                f"Delivered by the standby: no session-role watcher holds {self.tasks_dir}. "
+                f'Re-arm yours via the Monitor tool: bash "{REPO}/src/watch-tasks-stream.sh" '
+                f'"{self.tasks_dir}" --role session --inbox "{self.tasks_dir}"')
+
     def sendkeys_log_text(self):
         return self.sendkeys_log.read_text()
 
@@ -1040,6 +1049,29 @@ class EventDispatchTests(FakeTmuxHarness):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TYPE Sutando task ready: task-g.txt", self.sendkeys_log_text(),
                       "a missing status file must not hold a task on an idle pane")
+
+
+class StandbyReminderTests(FakeTmuxHarness):
+    """Every notifier delivery is a standby delivery, so the pane text says so,
+    names the re-arm command, and the log records the delivery as the standby's."""
+
+    def test_the_prompt_names_the_standby_and_the_rearm_command(self):
+        self.pane_file.write_text(IDLE_FOOTER + "\n")
+        self.write_task("task-sb.txt")
+        self.run_event("task-sb.txt", timeout=15)
+        typed = self.sendkeys_log_text()
+        # Equality, not containment: this is what pins expected_prompt() — which the
+        # inflight suite stages into its composer — to what the notifier really types.
+        self.assertIn(f"TYPE {self.expected_prompt('task-sb.txt')}", typed)
+        self.assertIn(f"Delivered by the standby: no session-role watcher holds {self.tasks_dir}", typed)
+        # The script path is quoted: a desktop install lives under "Application Support".
+        self.assertIn(f'Re-arm yours via the Monitor tool: bash "{REPO}/src/watch-tasks-stream.sh" "{self.tasks_dir}" --role session --inbox "{self.tasks_dir}"', typed)
+        import shlex
+        rearm = typed.split("Re-arm yours via the Monitor tool: ", 1)[1].split("\n", 1)[0]
+        self.assertEqual(shlex.split(rearm)[1], f"{REPO}/src/watch-tasks-stream.sh", "the script path survives shell parsing as ONE word")
+        log = (self.logs_dir / "claude-task-notifier.log").read_text()
+        self.assertIn(f"delivering task-sb.txt as the standby: no session-role watcher holds {self.tasks_dir}", log)
+
 
 
 class SmallViewportTests(FakeTmuxHarness):
