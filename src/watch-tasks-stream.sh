@@ -316,8 +316,6 @@ HANDLER_STATE_READY=""
 WATCH_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sutando-task-watch.XXXXXX")"
 mkfifo "$WATCH_RUNTIME_DIR/events"
 FSWATCH_PID=""
-CATCHUP_SEEN_DIR="$WATCH_RUNTIME_DIR/catchup-seen"
-mkdir -p "$CATCHUP_SEEN_DIR"
 CLEANING_UP=0
 CLAIMS_DIR="$WORKSPACE_DIR/state/task-event-handler-claims"
 # Per instance: this receipt says "MY optional handler declined this task", and
@@ -988,29 +986,14 @@ trap 'cleanup; exit 0' HUP INT TERM
 # restart gap, in priority order. Install cleanup first so an immediately
 # exiting fswatch cannot kill a just-started provider before its durable
 # fallback receipt is emitted.
-task_fingerprint() {
-  local path="$1" mtime size
-  case "$(uname -s)" in
-    Darwin) mtime="$(stat -f '%m' "$path" 2>/dev/null)" ;;
-    *) mtime="$(stat -c '%Y' "$path" 2>/dev/null)" ;;
-  esac
-  size="$(wc -c < "$path" 2>/dev/null | tr -d '[:space:]')"
-  [ -n "$mtime" ] && [ -n "$size" ] || return 1
-  printf '%s:%s\n' "$mtime" "$size"
-}
-
+# The periodic floor (#4590) and the startup pass are the same walk; only the
+# occasion differs. Dedup is dispatch_task's: it admits one file identity
+# (name|inode:cksum) per watcher lifetime, on every path, so a task seen by
+# both fswatch and a sweep is admitted once without a second ledger here.
 catchup_sweep() {
-  local fn path fingerprint seen
+  local fn
   while IFS= read -r fn; do
-    path="$TASKS_DIR/$fn"
-    [ -f "$path" ] || continue
-    fingerprint="$(task_fingerprint "$path")" || continue
-    seen="$CATCHUP_SEEN_DIR/$fn"
-    if [ -f "$seen" ] && [ "$(cat "$seen" 2>/dev/null)" = "$fingerprint" ]; then
-      continue
-    fi
-    dispatch_task "$path"
-    printf '%s\n' "$fingerprint" > "$seen"
+    dispatch_task "$TASKS_DIR/$fn"
   done < <(priority_sorted_tasks)
 }
 
@@ -1060,16 +1043,13 @@ if [ -n "$HANDLER_CONFIG_DIR" ]; then
   mkdir -p "$HANDLER_CONFIG_DIR"
   fswatch_paths+=("$HANDLER_CONFIG_DIR")
 fi
-start_fswatch() {
-  fswatch \
-    -l 0.5 \
-    --event Created \
-    --event Renamed \
-    --event Updated \
-    "${fswatch_paths[@]}" > "$WATCH_RUNTIME_DIR/events" 2>/dev/null &
-  FSWATCH_PID=$!
-}
-start_fswatch
+fswatch \
+  -l 0.5 \
+  --event Created \
+  --event Renamed \
+  --event Updated \
+  "${fswatch_paths[@]}" > "$WATCH_RUNTIME_DIR/events" 2>/dev/null &
+FSWATCH_PID=$!
 # The writer end opens only once a reader exists, so fswatch execs here, not at
 # the launch above; fd 3 stays open so the loop's own open can never be the last reader.
 exec 3< "$WATCH_RUNTIME_DIR/events"
@@ -1194,17 +1174,9 @@ while true; do
       fi
       continue
     fi
-    # A session watcher is supervised by the hosting process.  Let it exit so
-    # that supervisor can re-arm the standby; keeping this process alive would
-    # defeat the session handoff contract.  Ordinary watchers own their own
-    # coverage and can re-arm fswatch locally.
-    if [ "$WATCHER_ROLE" = "session" ]; then
-      break
-    fi
-    # fswatch died and closed its end of the pipe: re-arm it before the next
-    # bounded catch-up pass rather than leaving the inbox permanently dark.
-    start_fswatch
-    sleep 1
+    # fswatch died and closed its end of the pipe: genuine EOF. Fall through
+    # to the script's normal exit path rather than spinning on a dead FIFO.
+    break
   fi
   handle_event "$path"
   retry_held_tasks_if_due
