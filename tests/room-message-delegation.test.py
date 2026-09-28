@@ -417,29 +417,33 @@ class OwnershipTests(unittest.TestCase):
                     self.assertEqual(generator.main(), 0)
                 self.assertIn("2 room-message distributions", output.getvalue())
 
-    def test_notify_import_fallback_loads_its_generated_sibling(self):
+    def test_import_fallback_loads_generated_siblings(self):
         real_import = builtins.__import__
-        attempted = []
+        for name, relative in (
+                ("notify", "skills/task-progress/scripts/notify.py"),
+                ("gateway", "skills/agent-room-ops/_gateway.py")):
+            with self.subTest(name=name):
+                attempted = []
 
-        def first_import_missing(name, *args, **kwargs):
-            if name == "room_message":
-                attempted.append(name)
-                if len(attempted) == 1:
-                    raise ModuleNotFoundError("No module named 'room_message'", name=name)
-            return real_import(name, *args, **kwargs)
+                def first_import_missing(module_name, *args, **kwargs):
+                    if module_name == "room_message":
+                        attempted.append(module_name)
+                        if len(attempted) == 1:
+                            raise ModuleNotFoundError("No module named 'room_message'", name=module_name)
+                    return real_import(module_name, *args, **kwargs)
 
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": directory, "SUTANDO_TELEMETRY": "0"}), \
-                mock.patch.dict(sys.modules), mock.patch.object(sys, "path", list(sys.path)), \
-                mock.patch.object(builtins, "__import__", side_effect=first_import_missing), \
-                mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("import network")):
-            sys.modules.pop("room_message", None)
-            notify = load("room_contract_notify_fallback", "skills/task-progress/scripts/notify.py")
-            self.assertEqual(attempted, ["room_message", "room_message"])
-            self.assertEqual(Path(notify.room_message.__file__).resolve(),
-                             ROOT / "skills/task-progress/scripts/room_message.py")
-            with self.assertRaisesRegex(ValueError, "extra_content"):
-                notify.room_message.room_message_payload({"extra_content": BAD})
+                with tempfile.TemporaryDirectory() as directory, \
+                        mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": directory, "SUTANDO_TELEMETRY": "0"}), \
+                        mock.patch.dict(sys.modules), mock.patch.object(sys, "path", list(sys.path)), \
+                        mock.patch.object(builtins, "__import__", side_effect=first_import_missing), \
+                        mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("import network")):
+                    sys.modules.pop("room_message", None)
+                    module = load("room_contract_" + name + "_fallback", relative)
+                    self.assertEqual(attempted, ["room_message", "room_message"])
+                    self.assertEqual(Path(module.room_message.__file__).resolve().parent,
+                                     (ROOT / relative).resolve().parent)
+                    with self.assertRaisesRegex(ValueError, "extra_content"):
+                        module.room_message.room_message_payload({"extra_content": BAD})
 
     def test_skills_load_generated_policy_without_a_core_checkout(self):
         probe = """
@@ -449,7 +453,7 @@ path = pathlib.Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location('standalone_contract', path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-assert pathlib.Path(module.room_message.__file__).parent == path.parent
+assert pathlib.Path(module.room_message.__file__).resolve().parent == path.resolve().parent
 payload = {'op': 'message', 'extra_content': {'wrapper': {'space.ag2.card': {}}}}
 with mock.patch('urllib.request.urlopen', side_effect=AssertionError('network reached')):
     if path.name == 'notify.py':
