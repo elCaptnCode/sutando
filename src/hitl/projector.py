@@ -17,6 +17,11 @@ from __future__ import annotations
 import time
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
+try:
+    from .. import room_message
+except ImportError:
+    import room_message
+
 from . import renotify
 from .manager import HitlManager
 from .schema import (
@@ -210,7 +215,7 @@ def project_pass(manager: HitlManager, send: Sender, room_id: str, clock: Option
         else:
             payload["op"] = "message"
         try:
-            answer = send(wire_safe(payload))
+            answer = send(room_message.room_message_payload(wire_safe(payload)))
         except Exception as e:  # noqa: BLE001 — classified; anything not this card's re-raises
             code = _refusal_code(e)
             if code is None:
