@@ -86,6 +86,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`emit-call-tiers.ts`** — Emit the core's advertisable *direct* call tiers to `state/call-tiers.json` — the runtime-authored half of the availability-driven call-tier menu (Track 9).
 - **`entrance_links.py`** — EntranceLink records — verified provider-identity ↔ Stand bindings (I2).
 - **`event_log.py`** — Structured event log for Sutando — JSONL events for post-mortem debugging.
+- **`external_core_helpers.py`** — Private startup receipts for externally managed core helpers; never manages processes.
 - **`file_lock.py`** — Cross-platform advisory file-lock primitives for shared runtime state.
 - **`fix-setup.sh`** — One-shot fix for Mac Mini after migration bundle setup
 - **`friction-detector.py`** — Proactive friction detector for Sutando.
@@ -93,6 +94,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`git_binary.py`** — Resolve a git executable that will actually run.
 - **`github-webhook.py`** — GitHub webhook bridge — receives GitHub events and writes task files.
 - **`health-check.py`** — Sutando health check — verifies all components are running correctly.
+- **`health_snapshot.py`** — Health snapshot — one read-only answer per agent (core and workers) from existing state files.
 - **`hook_transcript_path.sh`** — Shared resolver for a Claude Code hook's transcript path.
 - **`http-body-limit.ts`** — Shared request-body cap for the two HTTP surfaces that accept a vision frame: the web-client's /vision/frame proxy and the voice-agent's vision control server.
 - **`inbox-resolve.sh`** — Inbox-entry resolver — sourceable so a test can invoke it in isolation.
@@ -117,6 +119,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`migrate.sh`** — Sutando Migration Script — bundle current machine state for transfer to new Mac
 - **`migration_safety_helpers.sh`** — shellcheck shell=bash PR #1440 — auto-migration safety helpers (Mini review).
 - **`morning-briefing.py`** — Morning briefing for Sutando.
+- **`native-pim-consent.ts`** — Native PIM consent — the voice-process client of skills/macos-tools/scripts/native_pim_consent.py.
 - **`notify.sh`** — Sutando: notify the user across available channels
 - **`obsidian-mirror.py`** — Obsidian sync — one-shot sweep of agent state into the Sutando vault.
 - **`optional_script.py`** — Dependency-light runner for optional script-backed capabilities.
@@ -134,6 +137,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`pending_questions_triage.py`** — Triage-queue policy for pending-questions.md: ranking, re-check verdict, dismissal.
 - **`personal-claude-compact-hint.sh`** — SessionStart(compact) hook — re-inject PERSONAL_CLAUDE.md after context compaction.
 - **`platform.ts`** — Cross-platform OS abstraction layer.
+- **`pool_suspension.py`** — Shared reader for the worker pool's suspension marker, `state/pool-suspended`.
 - **`presenter-mode.ts`** — Provider-neutral presenter-mode sentinel policy — TS twin of src/presenter_mode.py (#2501).
 - **`presenter_mode.py`** — Provider-neutral presenter-mode sentinel policy.
 - **`proactive_claim_fence.py`** — Proactive claim lifecycle on the outbox ClaimBackend seam.
@@ -143,6 +147,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`progress_stream.py`** — Progress-streaming helpers for the messaging bridges (issue: Hermes-style streaming tool output, 2026-06-05).
 - **`prompt_excerpt.py`** — What the owner must read from a blocked terminal pane: the prompt minus the chrome around it.
 - **`python-binary.ts`** — Resolve a python3 interpreter that will actually run.
+- **`quota_availability.py`** — Shared authority for whether Claude quota telemetry is usable.
 - **`quota_projection.py`** — Quota usage history + even-pace projection series for the dashboard chart.
 - **`reachability-endpoints.ts`** — Direct-reachability endpoint detection (US-10, Tier 2b) — "call your agent from another device and still reach YOUR core, directly, without routing through the cloud."
 - **`read_discord_channel.py`** — Gated Discord channel reader — compatibility wrapper over the shared reader and the shared contextNotFrom policy.
@@ -190,6 +195,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`startup.sh`** — Sutando startup — starts available services + the selected core CLI.
 - **`station_stamp.py`** — The desktop's station stamp: what the running core's sutando-station server was started with.
 - **`stop.sh`** — Stop all Sutando services (shortcut for restart.sh --stop-only)
+- **`stop_hook_repeat.py`** — The Stop hook's same-queue repeat counter, per runtime instance.
 - **`stop_hook_unwatched.py`** — The Stop hook's consecutive-unwatched-turn-end counter, per runtime instance.
 - **`sutando_config.py`** — Canonical loader for `sutando.config.json` / `sutando.config.local.json`.
 - **`sutando_config.ts`** — Canonical loader for `sutando.config.json` / `sutando.config.local.json`.
@@ -220,6 +226,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`url-scheme.ts`** — Scheme normalization for URLs handed to Chrome via AppleScript.
 - **`util_paths.py`** — Resolve personal-asset paths with private-dir-first lookup.
 - **`util_paths.ts`** — TypeScript twin of src/util_paths.py — personal-asset path resolution.
+- **`vault-secret.ts`** — Read a secret the owner stored with `vault set KEY …` from the Keychain item that src/vault_intercept.py writes (`security add-generic-password -a sutando -s KEY`).
 - **`vault_intercept.py`** — Bridge-level vault secret interception.
 - **`vault_set_grammar.py`** — Pure, dependency-free `vault set KEY VALUE` grammar — regex + redact-only.
 - **`verify-gemini-31.sh`** — Sutando Gemini 3.1 rollout verification
@@ -253,6 +260,7 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`watcher_sentinel.sh`** — Ownership protocol for state/watch-tasks-stream.pid — the ONE writer contract.
 - **`web-client.ts`** — Web Audio Client for Sutando
 - **`web-voice-transport.ts`** — web-voice-transport — the framework-agnostic browser voice-client CORE.
+- **`worker_auth_state.py`** — Is a Claude CLI pane still signed out?
 - **`workspace_default.py`** — Canonical workspace-directory resolution for Sutando services.
 - **`workspace_default.ts`** — Canonical workspace-directory resolution for Sutando TS services.
 - **`workspace_layout.py`** — Spawn-time guard for the `<repo>/workspace` wiring: heals recoverable breaks to the durable symlink; a real directory HOLDING data is never touched.
@@ -274,6 +282,14 @@ One entry per agent-facing module. 5 without a usable header comment.
 - **`start-cli.sh`** — Canonical persistent-core launcher.
 - **`stop-core.sh`** — src/agent/stop-core.sh — stop ONLY the core CLI tmux session (sonichi#2401).
 - **`task-event-handler-lookup.sh`** — Reads the task-event handler declared in a small JSON config file.
+
+## `src/agent/agy/`
+
+- **`onboarding_seed.py`** — Idempotently pre-seed agy's (Antigravity CLI) onboarding-complete cache.
+
+## `src/agent/agy/cli/`
+
+- **`start-cli.sh`** — Standalone persistent tmux launcher for `agy` (Google's Antigravity CLI).
 
 ## `src/agent/claude/cli/`
 
@@ -307,10 +323,12 @@ One entry per agent-facing module. 5 without a usable header comment.
 
 - **`__init__.py`** — _(no header comment)_
 - **`channel_key.py`** — Per-channel pull path for task-result files in `results/`.
+- **`nudge_gate.py`** — Whether a supervisor with no session-role watcher should nudge, alert, or arm.
 - **`pane_gate.py`** — Pane idle-gate and line delivery for a core CLI pane — the consumer-side policy every external task-notifier shares.
 - **`readiness.py`** — Readiness of a `results/<task-id>.txt` file, for every delivery consumer.
 - **`router.py`** — Result Router — fallback & audit policy (Result Router v1, slice S4).
 - **`task_dispatch.py`** — Consumer-side dispatch policy shared by every external task-notifier.
+- **`worker-stage.sh`** — One pool delivery stage writer for the Claude watcher and Codex notifier.
 
 ## `src/hitl/`
 

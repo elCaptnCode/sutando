@@ -238,7 +238,7 @@ Tier dispatch, always in force: `access_tier: owner` (or a missing field) gets f
 
 ## Community support routing
 
-When the user reports a Sutando problem you cannot resolve (setup failures, bugs needing upstream fixes, behavior you can't explain), recommend the official Discord — https://discord.gg/uZHWXXmrCS — where real humans and community-run agents provide support. Include it alongside, not instead of, whatever diagnosis you can offer. Don't recommend it for questions you can answer yourself.
+Asked to report or file a bug or feature about Sutando, AG2 Space or the desktop app, in a DM or a room, use the `report-feedback` skill, never a chat post or another agent; reply with the reference id it returns. For a Sutando problem you cannot resolve, also recommend the official Discord, https://discord.gg/uZHWXXmrCS, beside your diagnosis; not for questions you can answer.
 
 ## Pending decisions
 
@@ -278,7 +278,7 @@ python3 skills/task-progress/scripts/notify.py \
   --message "On it — looking into that now. Back in a minute."
 ```
 
-Read `source` and `channel_id` from the task file (`source: slack/discord/telegram`, `channel_id:` for Slack/Discord, `chat_id:` for Telegram → use `--chat-id`). For Slack @mention threads, add `--thread-ts <reply_thread_ts>` to keep updates in-thread. An AG2 Space task (`source: ag2space`) takes `--source ag2space --channel-id <room>` (its `channel_id`); the update lands in that room through the gateway.
+Read `source` and `channel_id` from the task file (`source: slack/discord/telegram`, `channel_id:` for Slack/Discord, `chat_id:` for Telegram → use `--chat-id`). To thread it, add `--thread-ts <reply_thread_ts>` (Slack @mention) or `--thread-root '<thread_root>'` (AG2 Space). An AG2 Space task (`source: ag2space`) takes `--source ag2space --channel-id <room>` (its `channel_id`); the update lands in that room through the gateway.
 
 **Queue position.** When the `QUEUE:` line (or `activity.py queue`) says more than one task is
 pending, the first line to that task's conversation names the position: one ahead, "Got it, right
@@ -302,10 +302,10 @@ with `python3 skills/agent-activity/scripts/activity.py append "<line>" --kind t
 
 ## Workspace layout
 
-- Vision + docs: `README.md` (this directory)
+- Vision + docs: `README.md`
 - Voice agent: `src/voice-agent.ts`
 - Task bridge: `src/task-bridge.ts`
-- Skills: `skills/`
+- Skills: `skills/`; yours: `<workspace>/skills/`
 
 **Looking for where an existing module lives?** [`docs/src-map.md`](docs/src-map.md)
 indexes every agent-facing source module under `src/` with a one-line purpose
@@ -361,7 +361,7 @@ room: 'I sent it to you in our DM.' Never move silently.
 
 Helper: `src/result-channel-key.ts` (TS) / `src/delivery/channel_key.py` (Python). Why the scoped name slides past every existing consumer, and how the phone drain claims it: [`docs/claude-md-moved-detail.md`](docs/claude-md-moved-detail.md) "Per-channel pull namespace".
 
-**IMPORTANT:** On session start, ensure a task watcher is running. Use the `Monitor` tool to stream `bash src/watch-tasks-stream.sh --role session --inbox "$(bash scripts/sutando-config.sh workspace)/tasks"` (`$SUTANDO_TASKS_DIR` as the inbox when set; the tag is what lets the external standby supervisor see this watcher and stand down) — it never exits during normal operation and emits `TASK_FILE: <name>` per new task as a per-event notification, followed by `QUEUE: <n> pending after this` only when other tasks are waiting. When a notification arrives, Read the named file, process it, and write a result to `results/`. The stream watcher replaces the older one-shot `watch-tasks.sh` (retired 2026-05-14) — no more restart-on-event cycles.
+**IMPORTANT:** On session start, ensure a task watcher is running. Use the `Monitor` tool to stream `bash src/watch-tasks-stream.sh --role session --inbox "$(bash scripts/sutando-config.sh workspace)/tasks"` (`$SUTANDO_TASKS_DIR` as the inbox when set; the tag is what lets the external standby supervisor see this watcher and stand down) — it never exits during normal operation and emits `TASK_FILE: <name>` per new task as a per-event notification, followed by `QUEUE: <n> pending after this` only when other tasks are waiting. When a notification arrives, Read the named file, process it, and write a result to `results/`. Pass `timeout_ms: 1800000` and re-arm on the expiry or early-exit notice (`Monitor` has no `persistent` option).
 
 If the watcher stops, start it again the same way; a start on a watched inbox exits 0 by itself. See [`docs/task-watcher-hosting-modes.md`](docs/task-watcher-hosting-modes.md).
 

@@ -7,8 +7,8 @@
 # The stub fswatch below STAYS UP and emits nothing. That is the failure mode:
 # a live event source that reports nothing is indistinguishable from a quiet
 # inbox, so only a bounded catch-up pass can close the gap. A stub that exits
-# would instead test EOF handling, which is a different contract (the watcher
-# must terminate so its EXIT trap can release the sentinel).
+# would instead test EOF handling, which is a different contract.
+# Pass --noisy to verify unrelated events cannot postpone the recovery floor.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,6 +27,15 @@ cat > "$TMP/bin/fswatch" <<'STUB'
 #!/bin/sh
 exec tail -f /dev/null
 STUB
+if [ "${1:-}" = "--noisy" ]; then
+  cat > "$TMP/bin/fswatch" <<'STUB'
+#!/bin/sh
+while :; do
+  printf '/unrelated-event\n'
+  sleep 0.1
+done
+STUB
+fi
 chmod +x "$TMP/bin/fswatch"
 
 OUT="$TMP/out"
