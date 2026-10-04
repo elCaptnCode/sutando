@@ -46,6 +46,29 @@ class Normalization(unittest.TestCase):
         # No blanket digit stripping (owner review): a bare number is content until a trace says otherwise.
         self.assertIn("run 42", n)
 
+    def test_a_compound_duration_is_one_field(self):
+        self.assertEqual(w.normalize("(12s · esc to interrupt)"), w.normalize("(1h 3m 12s · esc to interrupt)"))
+        self.assertEqual(w.normalize("took 3.5s"), "took <dur>")
+
+    def test_spelled_out_durations_are_one_field(self):
+        self.assertEqual(w.normalize("Retrying in 5 seconds"), w.normalize("Retrying in 4 seconds"))
+        self.assertEqual(w.normalize("waited 2 minutes 1 second"), "waited <dur>")
+
+    def test_the_spinner_lines_cycling_glyph_is_not_a_new_state(self):
+        frames = [f"{g} Hatching… (9s · ↓ 1.2k tokens · esc to interrupt)" for g in "✻✶✳✢·✽*"]
+        self.assertEqual(len({w.state_id(f) for f in frames}), 1)
+        self.assertNotEqual(w.state_id("✻ Hatching… (9s)"), w.state_id("✻ Cooking… (9s)"))
+
+    def test_a_hyphenated_spinner_verb_cycles_its_glyph_without_a_new_state(self):
+        for verb in ("Dilly-dallying", "Re-ticulating", "Topsy-turvying"):
+            with self.subTest(verb=verb):
+                frames = [f"{g} {verb}… (9s · ↓ 1.2k tokens · esc to interrupt)" for g in "✻✶✳✢·✽*"]
+                self.assertEqual(len({w.state_id(f) for f in frames}), 1)
+
+    def test_a_markdown_bullet_is_content_not_a_spinner(self):
+        self.assertNotEqual(w.state_id("* Fix the parser\n"), w.state_id("· Fix the parser\n"))
+        self.assertIn("* Fix the parser", w.normalize("* Fix the parser"))
+
     def test_semantic_digits_are_progress_not_noise(self):
         self.assertNotEqual(w.state_id("editing migration_41.sql\n"), w.state_id("editing migration_42.sql\n"))
         self.assertNotEqual(w.state_id("processing shard 17\n"), w.state_id("processing shard 18\n"))
@@ -1138,6 +1161,9 @@ class LiveParkedBanner(unittest.TestCase):
         ("compacting", "Compacting conversation…"),
         ("needs-login", "Please log in to continue"),
         ("needs-login", "Session expired. Run /login"),
+        ("needs-login", "  ⎿  Login expired · Please run /login"),
+        ("needs-login", "OAuth access token has expired · Please run /login"),
+        ("needs-login", "Not logged in · Please run /login"),
         ("quota-limit", "You have hit your usage limit · resets 3pm"),
         ("out-of-credits", "Credit balance is too low"),
         ("awaiting-input", "Waiting for your approval"),
@@ -1150,6 +1176,9 @@ class LiveParkedBanner(unittest.TestCase):
         "the network error we saw yesterday was different",
         "I logged in to continue the review",
         "the usage limit is documented here",
+        "Login expired is what the banner said",
+        "not logged in yet, will retry",
+        "the OAuth access token has expired, so I ran /login and it worked fine",
     )
 
     def test_each_live_banner_is_found_with_its_family_and_name(self):
@@ -1170,6 +1199,53 @@ class LiveParkedBanner(unittest.TestCase):
         for line in self.PROSE:
             if w.matched_abnormal([line]):
                 self.assertEqual([], w.live_banner_lines(line), line)
+
+
+class NeedsLoginRecognisesTheDialogTitleNotOnlyProseAboutLoggingIn(unittest.TestCase):
+    """The family matched Claude's own "run /login" phrasing but not the login
+    DIALOG'S title text -- a real blind spot, not the Fable-limit collision this
+    looks like at a glance (that one is already caught, by the whole-line
+    quota-limit grammar's optional session/usage/... group, and is fenced off by
+    pane_gate's existing named-gate-first precedence, not by cli_wedge)."""
+
+    TITLES = ("Select login method", "Paste code here", "Browser didn't open")
+    PROSE = "I logged in yesterday and it worked fine."
+
+    def test_each_dialog_title_is_needs_login(self):
+        for title in self.TITLES:
+            with self.subTest(title=title):
+                v = w.frame_abnormal(title)
+                self.assertEqual((v.kind, v.names), ("abnormal", ("needs-login",)))
+
+    def test_prose_about_logging_in_stays_clean(self):
+        self.assertIsNone(w.frame_abnormal(self.PROSE))
+
+    def test_fable_limit_was_already_caught_by_the_looser_whole_line_grammar(self):
+        # Control: proves this PR did not newly create the Fable/quota-limit
+        # overlap -- it already existed via live_banner_lines before this change.
+        v = w.frame_abnormal("reached your Fable limit")
+        self.assertEqual((v.kind, v.names), ("provider-limit", ("quota-limit",)))
+
+
+class TheWorkingMarkerIsMotionSoItLivesWithTheMotionAxis(unittest.TestCase):
+    """`esc to interrupt` says a turn is in flight, which is this module's axis.
+    classify() answers motion only from frame-to-frame novelty, so it needs two
+    samples and cannot speak for a single capture; frame_working can."""
+
+    RUNNING = "\u273b Thinking\u2026 (12s \u00b7 esc to interrupt)"
+
+    def test_the_affordance_is_a_running_turn(self):
+        self.assertTrue(w.frame_working(self.RUNNING))
+
+    def test_an_idle_footer_is_not(self):
+        self.assertFalse(w.frame_working("\u23f5\u23f5 bypass permissions on"))
+
+    def test_it_is_orthogonal_to_the_abnormal_verdict(self):
+        # A retrying pane is BOTH working-looking and abnormal; each answers its own
+        # question, and the gate's ordering between them is the gate's to make.
+        both = self.RUNNING + "\n  \u23bf  Connection error. Retrying in 2 seconds\u2026"
+        self.assertTrue(w.frame_working(both))
+        self.assertEqual(w.frame_abnormal(both).kind, "retry-loop")
 
 
 class FrameAbnormalRanksOneCaptureAsTheWindowRanksASample(unittest.TestCase):
