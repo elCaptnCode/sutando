@@ -882,8 +882,7 @@ dispatch_task() {
   # same bytes in the same inode is not a new task; a replaced file is.
   identity="$filename|$(task_file_identity "$task_path")"
   # Without a checksum, inode plus mtime still names these bytes well enough to
-  # dedupe the catch-up pass; a malformed identity never dedupes (a duplicate is
-  # recoverable, a silently dropped task is not).
+  # dedupe a re-examination; no identity at all never dedupes (a duplicate is recoverable).
   case "$identity" in
     *"|"[0-9]*:[0-9]*-[0-9]*) ;;
     *)
@@ -1084,18 +1083,16 @@ startup_sweep() {
     dispatch_task "$TASKS_DIR/$fn"
   done < <(priority_sorted_tasks)
 }
-# Every CATCHUP_INTERVAL seconds of silence the inbox is listed for what the event
-# stream never reported. The mark is set before the startup sweep lists, so an
-# entry landing during that sweep is in the first window; the dedupe absorbs overlap.
+# Every CATCHUP_INTERVAL seconds of silence, the inbox is listed for what the event stream
+# never reported. The mark predates the startup sweep's listing; the dedupe absorbs the overlap.
 CATCHUP_INTERVAL="${SUTANDO_WATCHER_CATCHUP_SECONDS:-30}"
 case "$CATCHUP_INTERVAL" in ''|*[!0-9]*) CATCHUP_INTERVAL=30 ;; esac
 CATCHUP_INTERVAL=$((10#$CATCHUP_INTERVAL))
 [ "$CATCHUP_INTERVAL" -gt 0 ] || CATCHUP_INTERVAL=30
 CATCHUP_MARK="$WATCH_RUNTIME_DIR/catchup-mark"
 : > "$CATCHUP_MARK"
-# Only entries with an mtime after the previous pass and before the last second
-# (still being written): each is examined by one pass, as fswatch would have
-# reported it once. The full listing stays with the startup sweep.
+# Only entries with an mtime after the previous pass and before the last second (still
+# being written): each is examined by one pass, as one fswatch event would have had it.
 catchup_sweep() {
   local cut="$CATCHUP_MARK.cut" at stamp f
   at=$(( $(date +%s) - 1 ))
