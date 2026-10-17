@@ -378,6 +378,14 @@ record_admission() {
   [ -z "$DECISION_IDENTITY" ] || DISPATCHED_IDS="$DISPATCHED_IDS$DECISION_IDENTITY
 "
 }
+# GNU first: on GNU, `stat -f` answers a different question and succeeds, so
+# the result is validated as numeric rather than trusted by exit status.
+file_mtime_s() {
+  local m
+  m="$(stat -c %Y -- "$1" 2>/dev/null || true)"
+  case "$m" in ''|*[!0-9]*) m="$(stat -f %m -- "$1" 2>/dev/null || true)" ;; esac
+  case "$m" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$m" ;; esac
+}
 # `ls -di` is one line on every POSIX ls; GNU `stat -f` prints a filesystem dump.
 task_file_identity() {
   local inode sum
@@ -837,12 +845,9 @@ dispatch_task() {
   # Only a fresh sentinel can be racing its payload, and only the resolver's
   # typed "no payload" verdict (rc 4) is about the entry rather than the run.
   local max_attempts=3 mtime now age=0
-  # GNU first: on GNU, `stat -f` answers a different question and succeeds, so
-  # the result is validated as numeric rather than trusted by exit status.
-  mtime="$(stat -c %Y -- "$task_path" 2>/dev/null || true)"
-  case "$mtime" in ''|*[!0-9]*) mtime="$(stat -f %m -- "$task_path" 2>/dev/null || true)" ;; esac
+  mtime="$(file_mtime_s "$task_path")"
   now="$(date +%s)"
-  case "$mtime" in ''|*[!0-9]*) ;; *) age=$((now - mtime)) ;; esac
+  [ -z "$mtime" ] || age=$((now - mtime))
   attempt=0
   until resolved="$(resolve_inbox_entry "$task_path")"; do
     rc=$?
@@ -876,11 +881,18 @@ dispatch_task() {
   # One admission per file identity per watcher lifetime: a later event for the
   # same bytes in the same inode is not a new task; a replaced file is.
   identity="$filename|$(task_file_identity "$task_path")"
-  # A malformed identity never dedupes: a duplicate is recoverable, a silently
-  # dropped task is not.
+  # Without a checksum, inode plus mtime still names these bytes well enough to
+  # dedupe the catch-up pass; a malformed identity never dedupes (a duplicate is
+  # recoverable, a silently dropped task is not).
   case "$identity" in
     *"|"[0-9]*:[0-9]*-[0-9]*) ;;
-    *) echo "watch-tasks-stream: no usable file identity for $filename; dispatching without dedupe" >&2; identity="" ;;
+    *)
+      identity="$filename|$(ls -di -- "$task_path" 2>/dev/null | awk 'NR==1 {print $1}'):m$(file_mtime_s "$task_path")"
+      case "$identity" in
+        *"|"[0-9]*:m[0-9]*) echo "watch-tasks-stream: no usable checksum for $filename; deduping on inode and mtime" >&2 ;;
+        *) echo "watch-tasks-stream: no usable file identity for $filename; dispatching without dedupe" >&2; identity="" ;;
+      esac
+      ;;
   esac
   if [ -n "$identity" ] && [ -n "$DISPATCHED_IDS" ] && printf '%s' "$DISPATCHED_IDS" | grep -qxF -- "$identity"; then
     return 0
@@ -1072,16 +1084,37 @@ startup_sweep() {
     dispatch_task "$TASKS_DIR/$fn"
   done < <(priority_sorted_tasks)
 }
+# Every CATCHUP_INTERVAL seconds of silence the inbox is listed for what the event
+# stream never reported. The mark is set before the startup sweep lists, so an
+# entry landing during that sweep is in the first window; the dedupe absorbs overlap.
+CATCHUP_INTERVAL="${SUTANDO_WATCHER_CATCHUP_SECONDS:-30}"
+case "$CATCHUP_INTERVAL" in ''|*[!0-9]*) CATCHUP_INTERVAL=30 ;; esac
+CATCHUP_INTERVAL=$((10#$CATCHUP_INTERVAL))
+[ "$CATCHUP_INTERVAL" -gt 0 ] || CATCHUP_INTERVAL=30
+CATCHUP_MARK="$WATCH_RUNTIME_DIR/catchup-mark"
+: > "$CATCHUP_MARK"
+# Only entries with an mtime after the previous pass and before the last second
+# (still being written): each is examined by one pass, as fswatch would have
+# reported it once. The full listing stays with the startup sweep.
+catchup_sweep() {
+  local cut="$CATCHUP_MARK.cut" at stamp f
+  at=$(( $(date +%s) - 1 ))
+  stamp="$(date -r "$at" +%Y%m%d%H%M.%S 2>/dev/null)" || stamp="$(date -d "@$at" +%Y%m%d%H%M.%S 2>/dev/null)" || return 0
+  touch -t "$stamp" "$cut" 2>/dev/null || return 0
+  if [ ! "$cut" -nt "$CATCHUP_MARK" ]; then
+    rm -f "$cut"
+    return 0
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] && handle_event "$f"
+  done < <(find "$TASKS_DIR_ABS" -maxdepth 1 -name '*.txt' -newer "$CATCHUP_MARK" ! -newer "$cut" 2>/dev/null | sort)
+  mv -f "$cut" "$CATCHUP_MARK"
+}
 # A session watcher sweeps only once the standby has stopped (below); any other
 # role has no peer on its inbox and sweeps before it subscribes, as always.
 if [ "$WATCHER_ROLE" != "session" ]; then
   startup_sweep
 fi
-
-CATCHUP_INTERVAL="${SUTANDO_WATCHER_CATCHUP_SECONDS:-${SUTANDO_HANDLER_POLL_INTERVAL:-30}}"
-case "$CATCHUP_INTERVAL" in
-  ''|*[!0-9]*|0) CATCHUP_INTERVAL=30 ;;
-esac
 
 # Stream subsequent events. -l 0.5 = 500ms latency batch (fswatch coalesces
 # burst events). --event Created --event Renamed catches new file
@@ -1281,7 +1314,7 @@ while :; do
   # set and deadline are current when the timeout is computed.
   retry_held_tasks_if_due
   if [ "$SECONDS" -ge "$CATCHUP_NEXT" ]; then
-    startup_sweep
+    catchup_sweep
     CATCHUP_NEXT=$(( SECONDS + CATCHUP_INTERVAL ))
   fi
   path=""

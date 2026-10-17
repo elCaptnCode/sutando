@@ -1,7 +1,6 @@
 #!/bin/bash
-# A pointer delivered while fswatch is alive but silent (an fseventsd stall) is
-# still announced by the bounded catch-up sweep: once, and never if answered.
-# Pass --noisy to show unrelated events cannot postpone the catch-up deadline.
+# A pointer fswatch (alive, silent: an fseventsd stall) never reports is announced
+# by catch-up once, never if answered, and a stale inbox does not slow it. --noisy: busy stream.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 pass=0; fail=0
@@ -36,6 +35,16 @@ p='$WS/tasks/'"\$(basename "\$1")"
 printf '%s\n' "\$p"
 EOF
 chmod +x "$RESOLVER"
+# A long-lived inbox: answered pointers nothing retired. The startup sweep pays
+# for them once; a catch-up pass must not pay for them again.
+STALE=40
+OLD="$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '1 hour ago' +%Y%m%d%H%M.%S)"
+for i in $(seq 1 "$STALE"); do
+  printf 'id: task-stale%s\ntask: old\n' "$i" > "$WS/tasks/task-stale$i.txt"
+  printf 'done.\n' > "$WS/results/task-stale$i.txt"
+  : > "$INBOX/task-stale$i.txt"
+  touch -t "$OLD" "$INBOX/task-stale$i.txt"
+done
 
 OUT="$TMP/out"; ERR="$TMP/err"; : > "$OUT"; : > "$ERR"
 PATH="$TMP/bin:$PATH" \
@@ -48,12 +57,14 @@ WATCHER_PID=$!
 
 # The sentinel is stamped after the startup sweep, so anything dropped after it
 # can only be found by catch-up.
-for _ in $(seq 1 100); do
+t0=$SECONDS
+for _ in $(seq 1 1200); do
   compgen -G "$WS/state/watch-tasks-stream*.pid" > /dev/null && break
   sleep 0.1
 done
 compgen -G "$WS/state/watch-tasks-stream*.pid" > /dev/null
-check $? "the watcher subscribed (sentinel stamped after the startup sweep)"
+check $? "the watcher subscribed (sentinel stamped after the startup sweep of $STALE stale pointers, $(( SECONDS - t0 ))s)"
+stale_refusals="$(grep -c 'already answered, not dispatching again: .*task-stale' "$ERR")"
 
 # An answered task: its result is live before its pointer lands.
 printf 'id: task-answered\naccess_tier: owner\ntask: already done\n' > "$WS/tasks/task-answered.txt"
@@ -80,8 +91,12 @@ sleep $(( CATCHUP * 3 + 1 ))
 check $? "it is announced exactly once across further catch-up sweeps (got $(grep -cF "$LIVE" "$OUT"))"
 ! grep -q 'task-answered' "$OUT"
 check $? "a pointer whose task already has a result is never announced"
-grep -q 'already answered, not dispatching again: .*task-answered' "$ERR"
-check $? "...because the sweep reached it and refused it, not because nothing looked"
+[ "$(grep -c 'already answered, not dispatching again: .*task-answered' "$ERR")" = "1" ]
+check $? "...the sweep reached it, refused it, and never re-examined it (refusals: $(grep -c 'task-answered' "$ERR"))"
+# Each stale pointer cost the startup sweep two subprocesses; the catch-up
+# passes since must have cost nothing for them.
+[ "$(grep -c 'already answered, not dispatching again: .*task-stale' "$ERR")" = "$stale_refusals" ]
+check $? "catch-up never re-examines the $STALE stale pointers the startup sweep already refused (refusals: $stale_refusals then $(grep -c 'task-stale' "$ERR"))"
 kill -0 "$WATCHER_PID" 2>/dev/null
 check $? "the watcher is still live (catch-up runs under the subscription, not instead of it)"
 
