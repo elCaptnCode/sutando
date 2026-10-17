@@ -1296,6 +1296,8 @@ while :; do
   else
     IFS= read -r path <&3; rc=$?
   fi
+  # bash 3.2's `read -t` alarm can cut a TERM trap's cleanup short and resume here.
+  [ "${CLEANING_UP:-0}" -eq 0 ] || { CLEANING_UP=0; cleanup; exit 0; }
   if [ "$rc" -eq 0 ]; then
     handle_event "$path"
   elif [ "$rc" -gt 128 ]; then
