@@ -131,8 +131,9 @@ the same supervisor pid; the second handoff took 12 s.
   exits 1, saying so, only when fswatch will not stay up.
 - **A live fswatch that reports nothing** (a stalled fseventsd, 2026-10-17: pointers landed in every
   seat inbox for hours and none was announced) is covered by the catch-up pass: every
-  `SUTANDO_WATCHER_CATCHUP_SECONDS` (30 s; empty, non-numeric or 0 reads as 30) of silence the watcher
-  lists the inbox for entries whose mtime falls after the previous pass and before the last second,
+  `SUTANDO_WATCHER_CATCHUP_SECONDS` (30 s; empty, non-numeric or 0 reads as 30), whether or not events
+  arrived meanwhile, the watcher lists the inbox for entries whose ctime (so a pointer renamed into the
+  inbox with an old mtime counts) falls after the previous pass and before the last second,
   and feeds each one through the same dispatch as an fswatch event. Each entry is examined by one pass,
   so an inbox full of answered pointers costs the startup sweep once and the catch-up passes nothing.
   Already-dispatched and already-answered entries are refused by the same dedupe the event path uses.

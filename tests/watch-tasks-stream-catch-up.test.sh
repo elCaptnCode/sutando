@@ -1,6 +1,6 @@
 #!/bin/bash
-# A pointer fswatch (alive, silent: an fseventsd stall) never reports is announced
-# by catch-up once, never if answered, and a stale inbox does not slow it. --noisy: busy stream.
+# A pointer fswatch (alive, silent: an fseventsd stall) never reports is announced by catch-up
+# once, also when renamed in with an old mtime, never if answered; a stale inbox does not slow it.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 pass=0; fail=0
@@ -15,7 +15,7 @@ trap 'if [ -n "$WATCHER_PID" ]; then kill -TERM "$WATCHER_PID" 2>/dev/null || tr
 
 CATCHUP=2
 WS="$TMP/ws"; INBOX="$WS/deliveries/w-test"
-mkdir -p "$WS/tasks" "$WS/results" "$WS/state" "$INBOX" "$TMP/bin"
+mkdir -p "$WS/tasks" "$WS/results" "$WS/state" "$INBOX" "$TMP/bin" "$TMP/tmp"
 # Alive and blocked, reporting nothing: what a stalled fseventsd looks like from here.
 printf '#!/bin/sh\nexec tail -f /dev/null\n' > "$TMP/bin/fswatch"
 if [ "${1:-}" = "--noisy" ]; then
@@ -47,7 +47,7 @@ for i in $(seq 1 "$STALE"); do
 done
 
 OUT="$TMP/out"; ERR="$TMP/err"; : > "$OUT"; : > "$ERR"
-PATH="$TMP/bin:$PATH" \
+PATH="$TMP/bin:$PATH" TMPDIR="$TMP/tmp" \
 SUTANDO_WORKSPACE_DIR="$WS" \
 SUTANDO_RESULTS_DIR="$WS/results" \
 SUTANDO_INBOX_RESOLVER="$RESOLVER" \
@@ -85,6 +85,23 @@ took="never"; [ -z "$seen" ] || took="$(( seen - dropped ))s"
 [ -n "$seen" ] && [ $(( seen - dropped )) -le $(( CATCHUP + 3 )) ]
 check $? "a pointer fswatch never reported is announced within ${CATCHUP}s + 3s margin (took $took)"
 
+# A pointer written elsewhere an hour ago and renamed into the inbox: its mtime is old,
+# only its ctime says it just arrived.
+printf 'id: task-renamed\naccess_tier: owner\ntask: moved in\n' > "$WS/tasks/task-renamed.txt"
+: > "$TMP/task-renamed.txt"
+touch -t "$OLD" "$TMP/task-renamed.txt"
+dropped=$(date +%s)
+mv "$TMP/task-renamed.txt" "$INBOX/task-renamed.txt"
+RENAMED="TASK_FILE: $WS/tasks/task-renamed.txt"
+seen=""
+for _ in $(seq 1 $(( (CATCHUP + 4) * 10 ))); do
+  grep -qF "$RENAMED" "$OUT" && { seen=$(date +%s); break; }
+  sleep 0.1
+done
+took="never"; [ -z "$seen" ] || took="$(( seen - dropped ))s"
+[ -n "$seen" ] && [ $(( seen - dropped )) -le $(( CATCHUP + 3 )) ]
+check $? "a pointer renamed into the inbox with an hour-old mtime is announced within ${CATCHUP}s + 3s margin (took $took)"
+
 # Three more catch-up intervals: each re-sweeps, none may re-announce.
 sleep $(( CATCHUP * 3 + 1 ))
 [ "$(grep -cF "$LIVE" "$OUT")" = "1" ]
@@ -112,6 +129,8 @@ fi
 WATCHER_PID=""
 [ "$trc" = "0" ]
 check $? "TERM during a pending catch-up read still stops the watcher through its trap (exit $trc)"
+! compgen -G "$TMP/tmp/sutando-task-watch.*" > /dev/null
+check $? "the watcher's runtime dir is gone after exit (left: $(ls -d "$TMP/tmp"/sutando-task-watch.* 2>/dev/null | wc -l | tr -d ' '))"
 
 echo
 if [ "$fail" = "0" ]; then echo "PASS — $pass checks green"; else echo "FAIL — $fail of $((pass+fail)) checks failed"; exit 1; fi

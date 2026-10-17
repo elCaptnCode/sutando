@@ -1046,7 +1046,7 @@ cleanup() {
   fi
   settle_own_claims_on_shutdown
   if [ -n "${WATCH_RUNTIME_DIR:-}" ]; then
-    rm -f "$WATCH_RUNTIME_DIR/events"
+    rm -f "$WATCH_RUNTIME_DIR/events" "$WATCH_RUNTIME_DIR/catchup-mark" "$WATCH_RUNTIME_DIR/catchup-mark.cut"
     rmdir "$WATCH_RUNTIME_DIR" 2>/dev/null || true
   fi
   # A group this process does not lead is its launcher's (a wrapper shell waiting
@@ -1083,16 +1083,16 @@ startup_sweep() {
     dispatch_task "$TASKS_DIR/$fn"
   done < <(priority_sorted_tasks)
 }
-# Every CATCHUP_INTERVAL seconds of silence, the inbox is listed for what the event stream
-# never reported. The mark predates the startup sweep's listing; the dedupe absorbs the overlap.
+# Every CATCHUP_INTERVAL seconds, events or not, the inbox is listed for what the event
+# stream never reported. The mark predates the startup sweep's listing; the dedupe absorbs the overlap.
 CATCHUP_INTERVAL="${SUTANDO_WATCHER_CATCHUP_SECONDS:-30}"
 case "$CATCHUP_INTERVAL" in ''|*[!0-9]*) CATCHUP_INTERVAL=30 ;; esac
 CATCHUP_INTERVAL=$((10#$CATCHUP_INTERVAL))
 [ "$CATCHUP_INTERVAL" -gt 0 ] || CATCHUP_INTERVAL=30
 CATCHUP_MARK="$WATCH_RUNTIME_DIR/catchup-mark"
 : > "$CATCHUP_MARK"
-# Only entries with an mtime after the previous pass and before the last second (still
-# being written): each is examined by one pass, as one fswatch event would have had it.
+# Entries whose ctime (a rename keeps the mtime; ctime is reset) falls after the previous pass
+# and before the last second meet one pass each. BSD and GNU -cnewer compare to the mark's mtime.
 catchup_sweep() {
   local cut="$CATCHUP_MARK.cut" at stamp f
   at=$(( $(date +%s) - 1 ))
@@ -1104,7 +1104,7 @@ catchup_sweep() {
   fi
   while IFS= read -r f; do
     [ -n "$f" ] && handle_event "$f"
-  done < <(find "$TASKS_DIR_ABS" -maxdepth 1 -name '*.txt' -newer "$CATCHUP_MARK" ! -newer "$cut" 2>/dev/null | sort)
+  done < <(find "$TASKS_DIR_ABS" -maxdepth 1 -name '*.txt' -cnewer "$CATCHUP_MARK" ! -cnewer "$cut" 2>/dev/null | sort)
   mv -f "$cut" "$CATCHUP_MARK"
 }
 # A session watcher sweeps only once the standby has stopped (below); any other
