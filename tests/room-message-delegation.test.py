@@ -19,6 +19,10 @@ import unittest
 from unittest import mock
 import urllib.request
 
+from _helpers.hermetic_env import isolate_os_environ
+
+isolate_os_environ()
+
 ROOT = Path(__file__).resolve().parents[1]
 ROOM = "!room:example.invalid"
 PEER = "@peer:example.invalid"
