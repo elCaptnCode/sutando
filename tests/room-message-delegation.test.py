@@ -38,6 +38,7 @@ PRODUCERS = {
     "skills/task-progress/scripts/notify.py",
     "skills/connect-apps/scripts/connectors.py",
     "src/hitl/projector.py",
+    "packages/ag2-sparrow/ag2_sparrow/hitl/projector.py",
     "packages/ag2-sparrow/ag2_sparrow/remote_gateway_bridge.py",
 }
 
@@ -87,7 +88,8 @@ class DelegationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, cls.env, clear=True), \
                 mock.patch.object(Path, "home", return_value=Path(cls.sandbox.name)), \
                 mock.patch.object(socket, "getaddrinfo", socket.getaddrinfo), \
-                mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("import network")):
+                mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("import network")), \
+                mock.patch.object(urllib.request, "build_opener", side_effect=AssertionError("import network")):
             cls.gateway = importlib.import_module("_gateway")
             cls.say = importlib.import_module("say")
             cls.mention = importlib.import_module("mention")
@@ -145,6 +147,77 @@ class DelegationTests(unittest.TestCase):
                         self.edge(name, payload)
                     checked.assert_called_once_with(CARD)
                     self.assertEqual(self.sent[-1], ("POST", BASE + "/v1/room", payload))
+
+    def test_sparrow_both_transports_refuse_before_serialization_or_network(self):
+        for deadline in (None, 120):
+            for operation in ("message", "edit"):
+                with self.subTest(deadline=deadline, operation=operation), \
+                        mock.patch.object(self.bridge.time, "monotonic", return_value=100), \
+                        mock.patch.object(self.bridge.json, "dumps") as serialize, \
+                        mock.patch.object(urllib.request, "build_opener") as opener, \
+                        mock.patch.object(self.bridge.threading, "Timer") as timer:
+                    payload = {"op": operation, "extra_content": {"body": "reserved"}}
+                    with policy_probe(self.bridge) as checked, self.assertRaisesRegex(ValueError, "extra_content"):
+                        self.bridge._req("POST", "/v1/room?contract=1", payload, deadline=deadline)
+                    checked.assert_called_once_with(payload["extra_content"])
+                    serialize.assert_not_called()
+                    self.network.assert_not_called()
+                    opener.assert_not_called()
+                    timer.assert_not_called()
+
+    def test_sparrow_both_transports_preserve_wire_credentials_and_timeout(self):
+        for deadline, timeout in ((None, 7), (120, 7), (103, 3)):
+            for operation in ("message", "edit"):
+                with self.subTest(deadline=deadline, operation=operation), \
+                        mock.patch.object(self.bridge.time, "monotonic", return_value=100), \
+                        mock.patch.object(urllib.request, "build_opener") as opener, \
+                        mock.patch.object(self.bridge.threading, "Timer") as timer, \
+                        mock.patch.object(self.bridge, "_gateway_call", wraps=self.bridge._gateway_call) as gateway:
+                    response = Response(b'{"ok": true, "event_id": "$event"}')
+                    transport = self.network if deadline is None else opener.return_value.open
+                    transport.return_value = response
+                    transport.side_effect = None
+                    payload = {"op": operation, "room_id": ROOM, "body": "hello", "extra_content": CARD,
+                               "event_id": "$prior", "dedupe_key": "contract", "reply_to": "$reply"}
+                    with policy_probe(self.bridge) as checked:
+                        answer = self.bridge._req("POST", "/v1/room?contract=1", payload, timeout=7,
+                                                  deadline=deadline)
+                    checked.assert_called_once_with(CARD)
+                    request = transport.call_args.args[0]
+                    self.assertEqual(request.data, json.dumps(payload).encode())
+                    self.assertEqual(request.full_url, BASE + "/v1/room?contract=1")
+                    self.assertEqual(request.get_method(), "POST")
+                    self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
+                    self.assertEqual(request.get_header("Content-type"), "application/json")
+                    self.assertEqual(request.get_header("Accept"), "application/json")
+                    self.assertEqual(request.get_header("User-agent"), "sutando-gateway-client/1.0")
+                    self.assertEqual(transport.call_args.kwargs, {"timeout": timeout})
+                    self.assertEqual(answer, {"ok": True, "event_id": "$event"})
+                    self.assertTrue(response.closed)
+                    gateway.assert_called_once_with()
+                    if deadline is None:
+                        opener.assert_not_called()
+                        timer.assert_not_called()
+                    else:
+                        timer.return_value.start.assert_called_once_with()
+                        timer.return_value.cancel.assert_called_once_with()
+
+    def test_sparrow_expired_deadline_and_failed_read_keep_cleanup(self):
+        with mock.patch.object(self.bridge.time, "monotonic", return_value=100), \
+                mock.patch.object(urllib.request, "build_opener") as opener, \
+                mock.patch.object(self.bridge.threading, "Timer") as timer:
+            with self.assertRaises(TimeoutError):
+                self.bridge._req("POST", "/v1/room", {"op": "message"}, deadline=99)
+            opener.assert_not_called()
+            self.network.assert_not_called()
+            timer.assert_not_called()
+            response = Response(b'{}')
+            opener.return_value.open.return_value = response
+            with mock.patch.object(self.bridge, "_read_by", side_effect=TimeoutError("test read")), \
+                    self.assertRaises(TimeoutError):
+                self.bridge._req("POST", "/v1/room", {"op": "message", "extra_content": CARD}, deadline=120)
+            self.assertTrue(response.closed)
+            timer.return_value.cancel.assert_called_once_with()
 
     def test_unrelated_routes_and_operations_keep_their_existing_payloads(self):
         cases = (("/v1/room", "create"), ("/v1/other", "message"), ("/v1/rooms", "edit"))
@@ -256,8 +329,9 @@ class DelegationTests(unittest.TestCase):
                        "dedupe_key": f"hitl:{requirement.id}:1",
                        "extra_content": {self.schema.WIRE_FIELD: requirement.to_wire()}}
             with policy_probe(self.projector) as checked:
-                self.projector.project(manager, sender, ROOM)
+                self.projector.project(manager, sender, ROOM, clock=lambda: 100)
                 manager.resolve(requirement.id)
+                manager.record_notice(requirement.id, {"recovered": True})
                 resolved = manager.get(requirement.id)
                 edited = {"op": "edit", "event_id": "$created", "room_id": ROOM,
                           "body": self.projector.fallback_body(resolved),
@@ -266,6 +340,35 @@ class DelegationTests(unittest.TestCase):
                 self.projector.project(manager, sender, ROOM)
             self.assertEqual(checked.call_count, 2)
             self.assertEqual(sent, [created, edited])
+
+    def test_projector_notice_refusal_preserves_ledger_and_retries_same_wire(self):
+        for notice in ("reminder", "recovery"):
+            for field in ("body", "space.ag2."):
+                with self.subTest(notice=notice, field=field), tempfile.TemporaryDirectory() as directory:
+                    manager, requirement = self.new_requirement(directory)
+                    self.projector.project(manager, lambda p: {"event_id": "$created"}, ROOM, clock=lambda: 100)
+                    if notice == "recovery":
+                        manager.resolve(requirement.id)
+                        manager.record_projection(requirement.id, manager.get(requirement.id).revision, None)
+                    before = manager.store.projection(requirement.id)
+                    sender = mock.Mock(return_value={"event_id": "$notice"})
+                    with mock.patch.object(self.projector, "NOTICE_FIELD", field), \
+                            self.assertRaises(ValueError):
+                        self.projector.project(manager, sender, ROOM, clock=lambda: 2000)
+                    sender.assert_not_called()
+                    self.assertEqual(manager.store.projection(requirement.id), before)
+                    self.assertIn(requirement.id, self.projector.pending_ids(manager, clock=lambda: 2000))
+                    with policy_probe(self.projector) as checked:
+                        result = self.projector.project(manager, sender, ROOM, clock=lambda: 2000)
+                    payload = sender.call_args.args[0]
+                    checked.assert_called_once_with(payload["extra_content"])
+                    self.assertEqual(payload["op"], "message")
+                    self.assertEqual(payload["extra_content"][self.schema.NOTICE_FIELD]["notice"], notice)
+                    self.assertEqual(result, [(requirement.id, "$notice")])
+                    self.assertNotEqual(manager.store.projection(requirement.id), before)
+                    sender.reset_mock()
+                    self.projector.project(manager, sender, ROOM, clock=lambda: 2000)
+                    sender.assert_not_called()
 
     def test_projector_refusal_precedes_sender_and_preserves_revision_for_retry(self):
         for operation in ("message", "edit"):
@@ -305,7 +408,6 @@ class DelegationTests(unittest.TestCase):
             messages = self.bridge._review_messages(record)
             with mock.patch.object(self.bridge, "_gateway_owner", return_value=PEER), \
                     mock.patch.object(self.bridge, "_owner_review_dm", return_value=ROOM), \
-                    mock.patch.object(self.bridge, "_atomic_private_json") as persist, \
                     policy_probe(self.bridge) as checked:
                 self.assertTrue(self.bridge._route_withheld_review(path))
             extra = {"space.ag2.a2ui": self.bridge._review_buttons(record["review_id"])}
@@ -318,8 +420,7 @@ class DelegationTests(unittest.TestCase):
                 if index == len(messages):
                     expected["extra_content"] = extra
                 self.assertEqual(self.sent[index - 1][2], expected)
-            self.assertEqual(persist.call_args.args[0], path)
-            self.assertEqual(persist.call_args.args[1]["status"], "awaiting_owner")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "awaiting_owner")
 
     def test_sparrow_review_refusal_prevents_card_post_and_durable_success(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -282,10 +282,11 @@ def _send_notices(manager: HitlManager, send: Sender, room_id: str, now: float,
         notice = {"notice": n.notice, "ids": [r.id for r, _ in n.members],
                   "runtime": n.req.runtime, "device": device.get("id") or "",
                   "host": device.get("host") or ""}
-        answer = send(wire_safe({"room_id": room_id, "op": "message",
-                                 "body": renotify.body(n.notice, n.req, now, since=n.since, queued=n.queued),
-                                 "dedupe_key": renotify.dedupe_key(n.notice, n.req, ledger, n.reminders),
-                                 "extra_content": {NOTICE_FIELD: notice}}))
+        payload = {"room_id": room_id, "op": "message",
+                   "body": renotify.body(n.notice, n.req, now, since=n.since, queued=n.queued),
+                   "dedupe_key": renotify.dedupe_key(n.notice, n.req, ledger, n.reminders),
+                   "extra_content": {NOTICE_FIELD: notice}}
+        answer = send(room_message.room_message_payload(wire_safe(payload)))
         if not isinstance(answer, dict) or not (answer.get("ok") or answer.get("event_id")):
             continue
         _accepted(manager)
