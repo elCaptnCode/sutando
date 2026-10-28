@@ -318,10 +318,10 @@ class DelegationTests(unittest.TestCase):
         self.assertIn(REFUSAL, error.getvalue())
         self.assertEqual(self.sent, [])
 
-    def new_requirement(self, directory):
+    def new_requirement(self, directory, **kwargs):
         manager = self.manager.HitlManager(self.manager.HitlStore(Path(directory)))
         requirement = manager.create(self.schema.HumanRequirement(kind="auth", runtime="claude",
-                                                                  message="Sign in", guard="contract"))
+                                                                  message="Sign in", guard="contract", **kwargs))
         return manager, requirement
 
     def test_projector_valid_create_and_edit_delegate_and_preserve_wire(self):
@@ -346,11 +346,15 @@ class DelegationTests(unittest.TestCase):
             self.assertEqual(sent, [created, edited])
 
     def test_projector_notice_refusal_preserves_ledger_and_retries_same_wire(self):
-        for notice in ("reminder", "recovery"):
+        for notice in ("reminder", "recovery", "failed"):
             for field in ("body", "space.ag2."):
                 with self.subTest(notice=notice, field=field), tempfile.TemporaryDirectory() as directory:
                     manager, requirement = self.new_requirement(directory)
-                    self.projector.project(manager, lambda p: {"event_id": "$created"}, ROOM, clock=lambda: 100)
+                    if notice == "failed":
+                        manager.refuse_projection(requirement.id, requirement.revision, "HTTP 400", 1,
+                                                  lambda n: {})
+                    else:
+                        self.projector.project(manager, lambda p: {"event_id": "$created"}, ROOM, clock=lambda: 100)
                     if notice == "recovery":
                         manager.resolve(requirement.id)
                         manager.record_projection(requirement.id, manager.get(requirement.id).revision, None)
@@ -373,6 +377,51 @@ class DelegationTests(unittest.TestCase):
                     sender.reset_mock()
                     self.projector.project(manager, sender, ROOM, clock=lambda: 2000)
                     sender.assert_not_called()
+
+    def test_projector_validates_the_normalized_notice_before_sending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager, _ = self.new_requirement(directory, device={"id": 7.5, "host": 2.5})
+            self.projector.project(manager, lambda p: {"event_id": "$created"}, ROOM, clock=lambda: 100)
+            sender = mock.Mock(return_value={"event_id": "$notice"})
+            with policy_probe(self.projector) as checked:
+                self.projector.project(manager, sender, ROOM, clock=lambda: 2000)
+            extra = sender.call_args.args[0]["extra_content"]
+            checked.assert_called_once_with(extra)
+            self.assertEqual(extra[self.schema.NOTICE_FIELD]["device"], "7.5")
+            self.assertEqual(extra[self.schema.NOTICE_FIELD]["host"], "2.5")
+
+    def test_projector_refused_notice_keeps_the_original_card_error_and_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager, requirement = self.new_requirement(directory, device={"id": "first"})
+            self.projector.project(manager, lambda p: {"event_id": "$created"}, ROOM, clock=lambda: 100)
+            manager.create(self.schema.HumanRequirement(kind="auth", runtime="claude",
+                                                        message="Second sign in", guard="second",
+                                                        device={"id": "second"}))
+            before = manager.store.projection(requirement.id)
+            refusal = OSError("card refused")
+            refusal.code = 400
+            sent = []
+
+            def sender(payload):
+                if self.schema.WIRE_FIELD in payload["extra_content"]:
+                    raise refusal
+                sent.append(payload)
+                return {"event_id": "$notice"}
+
+            self.addCleanup(self.projector._NO_ACCEPT_SINCE.pop, str(manager.store.root), None)
+            with mock.patch.object(self.projector, "NOTICE_FIELD", "body"), self.assertRaises(OSError) as raised:
+                self.projector.project_pass(manager, sender, ROOM, clock=lambda: 2000, monotonic=lambda: 10)
+            self.assertIs(raised.exception, refusal)
+            self.assertEqual(sent, [])
+            self.assertEqual(manager.store.projection(requirement.id), before)
+            self.assertEqual(refusal.projection.done, [])
+            with self.assertRaises(OSError) as retried:
+                self.projector.project_pass(manager, sender, ROOM, clock=lambda: 2000, monotonic=lambda: 20)
+            self.assertIs(retried.exception, refusal)
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0]["extra_content"][self.schema.NOTICE_FIELD]["notice"], "reminder")
+            self.assertEqual(manager.store.projection(requirement.id)["reminders"], 1)
+            self.assertEqual(refusal.projection.done, [(requirement.id, "$notice")])
 
     def test_projector_refusal_precedes_sender_and_preserves_revision_for_retry(self):
         for operation in ("message", "edit"):

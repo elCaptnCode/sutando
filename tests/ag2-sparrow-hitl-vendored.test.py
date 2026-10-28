@@ -28,7 +28,7 @@ class VendoredHitl(unittest.TestCase):
             from ag2_sparrow.hitl.manager import HitlManager, HitlStore
             from ag2_sparrow.hitl.schema import HumanRequirement
             assert projector.room_message is room_message
-            for notice in ('reminder', 'recovery'):
+            for notice in ('reminder', 'recovery', 'failed'):
                 with tempfile.TemporaryDirectory() as directory:
                     manager = HitlManager(HitlStore(Path(directory)))
                     req = manager.create(HumanRequirement(kind='auth', runtime='claude',
@@ -43,7 +43,10 @@ class VendoredHitl(unittest.TestCase):
                             raise AssertionError('invalid card accepted')
                     sender.assert_not_called()
                     assert manager.needs_projection(req.id)
-                    projector.project(manager, sender, '!room:example.invalid', clock=lambda: 100)
+                    if notice == 'failed':
+                        manager.refuse_projection(req.id, req.revision, 'HTTP 400', 1, lambda n: {})
+                    else:
+                        projector.project(manager, sender, '!room:example.invalid', clock=lambda: 100)
                     if notice == 'recovery':
                         manager.resolve(req.id)
                         manager.record_projection(req.id, manager.get(req.id).revision, None)
