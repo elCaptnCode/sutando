@@ -69,7 +69,8 @@ Run `pwsh -NoProfile -File tests/windows-sandbox-canary.test.ps1 -RunLive` after
 installing/upgrading the runner. This opt-in test uses the installed Claude
 authentication, starts an isolated dispatcher with temporary tasks and dummy
 secrets, and requires nonempty successful answers for guest, plain Team, legacy
-other, and ambient tasks. Missing authentication or an unavailable runner fails
+other, and ambient tasks, plus a correct answer to an allowed public question.
+Missing authentication or an unavailable runner fails
 the test; it is not accepted as proof of isolation. It also checks that a dummy
 parent `CLAUDE.md` is not loaded. Deterministic Windows CI covers argument
 boundaries, routing, cleanup, and fail-closed behavior without model credentials.
