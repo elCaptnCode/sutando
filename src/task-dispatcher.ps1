@@ -210,15 +210,6 @@ function Get-TaskHeader($path, $key) {
     return $null
 }
 
-function Get-SystemInstructions($path) {
-    $content = Get-Content -Raw -Path $path -ErrorAction SilentlyContinue
-    if (-not $content) { return $null }
-    $marker = '===SUTANDO SYSTEM INSTRUCTIONS'
-    $start = $content.LastIndexOf($marker, [StringComparison]::Ordinal)
-    if ($start -lt 0) { return $null }
-    return $content.Substring($start).Trim()
-}
-
 # Session map persists across dispatcher restarts so a channel keeps the same
 # resumable claude conversation. Schema:
 #   { "<channel_id>": "<session-uuid>", ... }
