@@ -141,6 +141,21 @@ int main(int argc, char **argv) {
         except PermissionError:
             return False  # the pid was reaped and reused by another user's process
 
+    def exited(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        # tmux owns reaping: its exited pane can still answer kill(pid, 0).
+        try:
+            state = subprocess.run(["ps", "-p", str(pid), "-o", "stat="],
+                                   capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return state.returncode == 0 and state.stdout.strip().startswith("Z")
+
     reap_seconds = WAIT_SECONDS
 
     def stop_server(self):
@@ -225,7 +240,7 @@ int main(int argc, char **argv) {
         name = wi.tmux_session_name(wid)
         before = self.observe(name, a, a_dir)
         os.kill(before["pid"], signal.SIGTERM)
-        gone = self.poll_until(lambda: not self.alive(before["pid"]))
+        gone = self.poll_until(lambda: self.exited(before["pid"]))
         self.assertTrue(gone, f"pane pid {before['pid']} survived SIGTERM for {WAIT_SECONDS} s")
         self.wait_for(lambda: sw.session_state(name, str(self.socket)) == "absent")
         runs = wi.incarnations(self.ws, wid)
